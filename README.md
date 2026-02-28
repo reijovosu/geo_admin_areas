@@ -52,7 +52,7 @@ npm run backup:global
 Backup + commit + push:
 
 ```bash
-npm run backup:push
+npm run backup:global:push
 ```
 
 ### Backup arguments
@@ -103,7 +103,7 @@ bash ./scripts/backup-and-push.sh
 Or via npm:
 
 ```bash
-npm run backup:push
+npm run backup:global:push
 ```
 
 What it does:
