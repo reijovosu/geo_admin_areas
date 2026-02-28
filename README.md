@@ -7,6 +7,7 @@ It saves files in this format:
 - `EE_L2.json`
 - `EE_L6.json`
 - `US_L4.json`
+- `countries.json`
 
 Each backup file keeps all source API fields:
 
@@ -33,6 +34,8 @@ All countries, selected levels:
 ```bash
 npm run backup -- --all-countries=1 --levels=2,4,6 --out-dir=./data --delay-ms=400
 ```
+
+When `--all-countries=1` is used, it also updates `data/countries.json` with country codes + names.
 
 All countries and all discovered levels:
 
@@ -73,6 +76,7 @@ npm run serve -- --data-dir=./data --host=127.0.0.1 --port=8787
 API routes:
 
 - `GET /health`
+- `GET /countries`
 - `GET /backups`
 - `GET /admin-areas?country=EE&level=2`
 - `GET /admin-areas/EE/2`

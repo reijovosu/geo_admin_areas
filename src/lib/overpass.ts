@@ -115,6 +115,60 @@ export const extractCountryCodes = (payload: Record<string, unknown>): string[] 
   return Array.from(countryCodes).sort();
 };
 
+export const extractCountries = (
+  payload: Record<string, unknown>,
+): Array<{
+  country_code: string;
+  name: string | null;
+  name_en: string | null;
+  int_name: string | null;
+  official_name: string | null;
+  tags: Record<string, unknown>;
+}> => {
+  const elements = Array.isArray(payload.elements)
+    ? (payload.elements as Array<Record<string, unknown>>)
+    : [];
+
+  const byCode = new Map<
+    string,
+    {
+      country_code: string;
+      name: string | null;
+      name_en: string | null;
+      int_name: string | null;
+      official_name: string | null;
+      tags: Record<string, unknown>;
+    }
+  >();
+
+  for (const element of elements) {
+    const tags =
+      element.tags && typeof element.tags === "object"
+        ? (element.tags as Record<string, unknown>)
+        : null;
+    if (!tags) continue;
+
+    const iso2 = String(tags["ISO3166-1"] ?? "").trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(iso2)) continue;
+
+    const toName = (value: unknown): string | null => {
+      const s = String(value ?? "").trim();
+      return s ? s : null;
+    };
+
+    byCode.set(iso2, {
+      country_code: iso2,
+      name: toName(tags.name),
+      name_en: toName(tags["name:en"]),
+      int_name: toName(tags.int_name),
+      official_name: toName(tags.official_name),
+      tags,
+    });
+  }
+
+  return Array.from(byCode.values()).sort((a, b) => a.country_code.localeCompare(b.country_code));
+};
+
 export const extractAdminLevels = (payload: Record<string, unknown>): number[] => {
   const elements = Array.isArray(payload.elements)
     ? (payload.elements as Array<Record<string, unknown>>)

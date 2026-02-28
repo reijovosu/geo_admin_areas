@@ -2,13 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { backupFilePath, readJsonFile } from "../lib/fs.js";
-import type { BackupPayload, ServeOptions } from "../lib/types.js";
+import type { BackupPayload, CountriesPayload, ServeOptions } from "../lib/types.js";
 
 interface BackupIndexItem {
   file: string;
-  country_code: string;
-  level: number;
+  country_code: string | null;
+  level: number | null;
   rows: number;
+  kind: "admin_areas" | "countries";
   updated_at: string;
 }
 
@@ -27,6 +28,19 @@ const listBackupFiles = (dataDir: string): string[] => {
 };
 
 const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
+  if (file === "countries.json") {
+    const parsed = readJsonFile<CountriesPayload>(path.join(dataDir, file));
+    const stat = fs.statSync(path.join(dataDir, file));
+    return {
+      file,
+      country_code: null,
+      level: null,
+      rows: Array.isArray(parsed.countries) ? parsed.countries.length : 0,
+      kind: "countries",
+      updated_at: stat.mtime.toISOString(),
+    };
+  }
+
   const match = file.match(/^([A-Z]{2})_L(\d+)\.json$/i);
   if (!match) return null;
 
@@ -38,6 +52,7 @@ const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
     country_code: match[1].toUpperCase(),
     level: Number(match[2]),
     rows: Array.isArray(parsed.rows) ? parsed.rows.length : 0,
+    kind: "admin_areas",
     updated_at: stat.mtime.toISOString(),
   };
 };
@@ -63,12 +78,25 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
 
     if (url.pathname === "/backups") {
       const items = listBackupFiles(dataDir)
+        .concat(fs.existsSync(path.join(dataDir, "countries.json")) ? ["countries.json"] : [])
         .map((file) => toIndexItem(dataDir, file))
         .filter((item): item is BackupIndexItem => item !== null);
       sendJson(res, 200, {
         count: items.length,
         items,
       });
+      return;
+    }
+
+    if (url.pathname === "/countries") {
+      const filePath = path.join(dataDir, "countries.json");
+      if (!fs.existsSync(filePath)) {
+        sendJson(res, 404, {
+          error: "countries.json not found. Run backup with --all-countries=1 first.",
+        });
+        return;
+      }
+      sendJson(res, 200, readJsonFile<CountriesPayload>(filePath));
       return;
     }
 
@@ -110,7 +138,13 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
 
     sendJson(res, 404, {
       error: "Not found",
-      routes: ["/health", "/backups", "/admin-areas?country=EE&level=2", "/admin-areas/EE/2"],
+      routes: [
+        "/health",
+        "/countries",
+        "/backups",
+        "/admin-areas?country=EE&level=2",
+        "/admin-areas/EE/2",
+      ],
     });
   });
 

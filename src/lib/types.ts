@@ -27,6 +27,29 @@ export interface BackupPayload {
   raw_api_response: unknown;
 }
 
+export interface CountriesMeta {
+  created_at: string;
+  refreshed_at: string;
+  source: "overpass";
+  format: 1;
+  endpoint: string;
+}
+
+export interface CountryItem {
+  country_code: string;
+  name: string | null;
+  name_en: string | null;
+  int_name: string | null;
+  official_name: string | null;
+  tags: Record<string, unknown>;
+}
+
+export interface CountriesPayload {
+  meta: CountriesMeta;
+  countries: CountryItem[];
+  raw_api_response: unknown;
+}
+
 export interface BackupOptions {
   countries: string[];
   allCountries: boolean;

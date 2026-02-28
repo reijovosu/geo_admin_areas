@@ -6,12 +6,13 @@ import {
   buildCountryLevelsQuery,
   buildOverpassQuery,
   extractAdminLevels,
+  extractCountries,
   extractCountryCodes,
   fetchOverpass,
 } from "../lib/overpass.js";
 import { isoUtcNow } from "../lib/time.js";
 import { overpassToRows } from "../lib/transform.js";
-import type { BackupOptions, BackupPayload } from "../lib/types.js";
+import type { BackupOptions, BackupPayload, CountriesPayload } from "../lib/types.js";
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,9 +46,40 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
   ensureDir(outDirAbs);
   const runTimestamp = isoUtcNow();
   const missingOnlyMode = options.allCountries && options.allLevels;
+  const countriesFilePath = path.join(outDirAbs, "countries.json");
 
-  const countryCodes = options.allCountries
-    ? extractCountryCodes((await fetchOverpass(buildAllCountriesQuery())).data)
+  const allCountriesResult = options.allCountries
+    ? await fetchOverpass(buildAllCountriesQuery())
+    : null;
+
+  if (allCountriesResult) {
+    if (missingOnlyMode && fs.existsSync(countriesFilePath)) {
+      console.log(`Skipping existing file ${countriesFilePath}`);
+    } else {
+      const createdAt = resolveCreatedAt(countriesFilePath, runTimestamp);
+      const countriesPayload: CountriesPayload = {
+        meta: {
+          created_at: createdAt,
+          refreshed_at: isoUtcNow(),
+          source: "overpass",
+          format: 1,
+          endpoint: allCountriesResult.endpoint,
+        },
+        countries: extractCountries(allCountriesResult.data),
+        raw_api_response: allCountriesResult.data,
+      };
+
+      fs.writeFileSync(
+        countriesFilePath,
+        `${JSON.stringify(countriesPayload, null, 2)}\n`,
+        "utf-8",
+      );
+      console.log(`Saved ${countriesFilePath} countries=${countriesPayload.countries.length}`);
+    }
+  }
+
+  const countryCodes = allCountriesResult
+    ? extractCountryCodes(allCountriesResult.data)
     : options.countries.map((countryCodeRaw) => countryCodeRaw.toUpperCase());
 
   if (countryCodes.length === 0) {
