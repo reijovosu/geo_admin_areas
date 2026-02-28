@@ -1,0 +1,19 @@
+{
+  "name": "geo-admin-area-backup",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "backup": "tsx src/index.ts backup",
+    "serve": "tsx src/index.ts serve"
+  },
+  "dependencies": {
+    "osmtogeojson": "^3.0.0-beta.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
