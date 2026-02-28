@@ -52,6 +52,17 @@ Equivalent script:
 npm run backup:global
 ```
 
+Memory tuning:
+
+- default Node heap for backup scripts is `12288` MB
+- override with `GEO_BACKUP_NODE_MB`
+
+Example:
+
+```bash
+GEO_BACKUP_NODE_MB=16384 npm run backup:global
+```
+
 Backup + commit + push:
 
 ```bash
