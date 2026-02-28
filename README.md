@@ -11,8 +11,8 @@ It saves files in this format:
 
 Each backup file keeps all source API fields:
 
-- full Overpass response in `raw_api_response`
-- matched raw element per row in `raw_api_element`
+- full Overpass response in a separate `*.raw.json` file, referenced by `raw_api_response_file`
+- matched raw element reference per row in `raw_api_ref` (for example `relation/79510`)
 - transformed row fields (`name`, `tags`, `geom_geojson`, `center_geojson`, etc.)
 
 ## Install
@@ -141,9 +141,9 @@ What it does:
       "center_geojson": "{...}",
       "geom_geojson": "{...}",
       "feature_properties": {},
-      "raw_api_element": {}
+      "raw_api_ref": "relation/79510"
     }
   ],
-  "raw_api_response": {}
+  "raw_api_response_file": "EE_L2.raw.json"
 }
 ```

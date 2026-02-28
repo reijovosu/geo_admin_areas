@@ -18,13 +18,13 @@ export interface BackupRow {
   center_geojson: string;
   geom_geojson: string;
   feature_properties: Record<string, unknown>;
-  raw_api_element: Record<string, unknown> | null;
+  raw_api_ref: string | null;
 }
 
 export interface BackupPayload {
   meta: BackupMeta;
   rows: BackupRow[];
-  raw_api_response: unknown;
+  raw_api_response_file: string;
 }
 
 export interface CountriesMeta {
@@ -47,7 +47,7 @@ export interface CountryItem {
 export interface CountriesPayload {
   meta: CountriesMeta;
   countries: CountryItem[];
-  raw_api_response: unknown;
+  raw_api_response_file: string;
 }
 
 export interface BackupOptions {

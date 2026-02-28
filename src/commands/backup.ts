@@ -34,6 +34,10 @@ const resolveCreatedAt = (filePath: string, fallback: string): string => {
   return fallback;
 };
 
+const rawResponseFilePath = (outDirAbs: string, countryCode: string, level: number): string => {
+  return path.join(outDirAbs, `${countryCode}_L${level}.raw.json`);
+};
+
 export const runBackup = async (options: BackupOptions): Promise<void> => {
   if (!options.allCountries && options.countries.length === 0) {
     throw new Error("No countries provided. Use --countries=EE,LV,LT");
@@ -66,8 +70,10 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           endpoint: allCountriesResult.endpoint,
         },
         countries: extractCountries(allCountriesResult.data),
-        raw_api_response: allCountriesResult.data,
+        raw_api_response_file: "countries.raw.json",
       };
+
+      fs.writeFileSync(path.join(outDirAbs, "countries.raw.json"), allCountriesResult.rawText, "utf-8");
 
       fs.writeFileSync(
         countriesFilePath,
@@ -110,10 +116,11 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
       console.log(`Fetching country=${countryCode} level=${level} ...`);
 
       const query = buildOverpassQuery(countryCode, level);
-      const { endpoint, data } = await fetchOverpass(query);
+      const { endpoint, data, rawText } = await fetchOverpass(query);
       const rows = overpassToRows(countryCode, level, data);
       const createdAt = resolveCreatedAt(filePath, runTimestamp);
       const refreshedAt = isoUtcNow();
+      const rawFileName = `${countryCode}_L${level}.raw.json`;
 
       const payload: BackupPayload = {
         meta: {
@@ -126,10 +133,11 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           endpoint,
         },
         rows,
-        raw_api_response: data,
+        raw_api_response_file: rawFileName,
       };
 
       fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+      fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
 
       console.log(`Saved ${filePath} rows=${rows.length}`);
       if (options.delayMs > 0) {

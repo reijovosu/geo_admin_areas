@@ -4,10 +4,6 @@ import type { BackupRow } from "./types.js";
 interface OverpassElement {
   type?: unknown;
   id?: unknown;
-  tags?: unknown;
-  center?: unknown;
-  geometry?: unknown;
-  [key: string]: unknown;
 }
 
 interface GeoJSONFeature {
@@ -114,19 +110,6 @@ const pickCenter = (
   return deriveCenterFromGeom(geom);
 };
 
-const buildElementIndex = (elements: OverpassElement[]): Map<string, OverpassElement> => {
-  const index = new Map<string, OverpassElement>();
-
-  for (const element of elements) {
-    const type = typeof element.type === "string" ? element.type.toLowerCase() : "";
-    const id = typeof element.id === "number" ? element.id : Number(element.id);
-    if (!type || !Number.isFinite(id)) continue;
-    index.set(`${type}/${id}`, element);
-  }
-
-  return index;
-};
-
 export const overpassToRows = (
   countryCode: string,
   level: number,
@@ -134,10 +117,17 @@ export const overpassToRows = (
 ): BackupRow[] => {
   const fc = osmtogeojson(overpassPayload) as GeoJSONFeatureCollection;
   const features = Array.isArray(fc.features) ? fc.features : [];
-  const elements = Array.isArray(overpassPayload.elements)
-    ? (overpassPayload.elements as OverpassElement[])
-    : [];
-  const elementIndex = buildElementIndex(elements);
+  const elements = Array.isArray(overpassPayload.elements) ? (overpassPayload.elements as OverpassElement[]) : [];
+  const elementRefs = new Set(
+    elements
+      .map((element) => {
+        const type = typeof element.type === "string" ? element.type.toLowerCase() : "";
+        const id = typeof element.id === "number" ? element.id : Number(element.id);
+        if (!type || !Number.isFinite(id)) return null;
+        return `${type}/${id}`;
+      })
+      .filter((ref): ref is string => !!ref),
+  );
 
   const rows: BackupRow[] = [];
 
@@ -161,7 +151,7 @@ export const overpassToRows = (
     const adminLevelCandidate = Number(properties.admin_level);
     const adminLevel = Number.isFinite(adminLevelCandidate) ? adminLevelCandidate : level;
 
-    const rawApiElement = elementIndex.get(`${osmType}/${osmId}`) ?? null;
+    const rawApiRef = `${osmType}/${osmId}`;
 
     rows.push({
       country_code: countryCode,
@@ -173,7 +163,7 @@ export const overpassToRows = (
       center_geojson: JSON.stringify(center),
       geom_geojson: JSON.stringify(geom),
       feature_properties: properties,
-      raw_api_element: rawApiElement,
+      raw_api_ref: elementRefs.has(rawApiRef) ? rawApiRef : null,
     });
   }
 

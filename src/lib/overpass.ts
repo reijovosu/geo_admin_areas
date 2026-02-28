@@ -42,7 +42,7 @@ out tags;
 
 export const fetchOverpass = async (
   query: string,
-): Promise<{ endpoint: string; data: Record<string, unknown> }> => {
+): Promise<{ endpoint: string; data: Record<string, unknown>; rawText: string }> => {
   let lastError: unknown = null;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
@@ -81,7 +81,7 @@ export const fetchOverpass = async (
         }
 
         const parsed = JSON.parse(text) as Record<string, unknown>;
-        return { endpoint, data: parsed };
+        return { endpoint, data: parsed, rawText: text };
       } catch (error) {
         lastError = error;
         await sleep(800 * Math.pow(2, attempt - 1));
