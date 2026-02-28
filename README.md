@@ -2,6 +2,25 @@
 
 TypeScript project for creating OSM admin-area backups and serving them as JSON.
 
+## Data source
+
+Backups are fetched from OpenStreetMap administrative boundary data through Overpass API:
+
+- OpenStreetMap: [https://www.openstreetmap.org](https://www.openstreetmap.org)
+- Overpass API main: [https://overpass-api.de](https://overpass-api.de)
+- Mirror: [https://overpass.kumi.systems](https://overpass.kumi.systems)
+- Mirror: [https://overpass.openstreetmap.ru](https://overpass.openstreetmap.ru)
+
+## Why this backup exists
+
+Overpass is very useful, but for bulk/global admin-area pulls it can be slow and occasionally unreliable (timeouts, rate limits, temporary outages).
+
+This project keeps local JSON backups so you can:
+
+- run tests without depending on live Overpass availability
+- serve stable snapshot data for low-risk / lower-critical applications
+- avoid repeated heavy requests against public Overpass endpoints
+
 It saves files in this format:
 
 - `EE_L2.json`
