@@ -40,6 +40,9 @@ All countries and all discovered levels:
 npm run backup -- --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400
 ```
 
+In this full-global mode, existing `data/[COUNTRY]_L[level].json` files are skipped.  
+Only missing files are downloaded.
+
 Equivalent script:
 
 ```bash
@@ -82,6 +85,8 @@ Each backup JSON includes:
 - `meta.refreshed_at`: timestamp when this specific country+level file was refreshed
 
 `refreshed_at` is updated on every write, even when the data did not change.
+
+Note: in full-global missing-only mode (`--all-countries=1 --all-levels=1`), existing files are not rewritten, so their timestamps stay unchanged until you run a targeted refresh.
 
 ## Local automation (backup + commit + push)
 

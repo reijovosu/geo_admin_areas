@@ -44,6 +44,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
   const outDirAbs = path.resolve(process.cwd(), options.outDir);
   ensureDir(outDirAbs);
   const runTimestamp = isoUtcNow();
+  const missingOnlyMode = options.allCountries && options.allLevels;
 
   const countryCodes = options.allCountries
     ? extractCountryCodes((await fetchOverpass(buildAllCountriesQuery())).data)
@@ -68,12 +69,17 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
     console.log(`Levels for ${countryCode}: ${levelsForCountry.join(",")}`);
 
     for (const level of levelsForCountry) {
+      const filePath = backupFilePath(outDirAbs, countryCode, level);
+      if (missingOnlyMode && fs.existsSync(filePath)) {
+        console.log(`Skipping existing file ${filePath}`);
+        continue;
+      }
+
       console.log(`Fetching country=${countryCode} level=${level} ...`);
 
       const query = buildOverpassQuery(countryCode, level);
       const { endpoint, data } = await fetchOverpass(query);
       const rows = overpassToRows(countryCode, level, data);
-      const filePath = backupFilePath(outDirAbs, countryCode, level);
       const createdAt = resolveCreatedAt(filePath, runTimestamp);
       const refreshedAt = isoUtcNow();
 
