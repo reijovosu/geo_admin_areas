@@ -40,6 +40,18 @@ All countries and all discovered levels:
 npm run backup -- --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400
 ```
 
+Equivalent script:
+
+```bash
+npm run backup:global
+```
+
+Backup + commit + push:
+
+```bash
+npm run backup:push
+```
+
 ### Backup arguments
 
 - `--countries`: comma-separated ISO country codes (default `EE`)
@@ -70,6 +82,31 @@ Each backup JSON includes:
 - `meta.refreshed_at`: timestamp when this specific country+level file was refreshed
 
 `refreshed_at` is updated on every write, even when the data did not change.
+
+## Local automation (backup + commit + push)
+
+Script file:
+
+- `scripts/backup-and-push.sh`
+
+Run it directly:
+
+```bash
+bash ./scripts/backup-and-push.sh
+```
+
+Or via npm:
+
+```bash
+npm run backup:push
+```
+
+What it does:
+
+1. Runs full backup (`npm run backup:global`)
+2. Stages `data/`
+3. Commits only if there are changes
+4. Pushes to your current branch remote
 
 ## Example backup file
 
