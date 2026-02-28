@@ -17,7 +17,6 @@ Each backup file keeps all source API fields:
 ## Install
 
 ```bash
-cd /Users/reijo/Projects/geo_admin_area
 npm install
 ```
 
