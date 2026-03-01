@@ -59,6 +59,28 @@ out tags;
 `;
 };
 
+export const buildParentRelationsQuery = (countryCode: string, parentLevel: number): string => {
+  return `
+[out:json][timeout:180];
+area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
+relation["boundary"="administrative"]["admin_level"="${parentLevel}"](area.country);
+out ids;
+`;
+};
+
+export const buildOverpassQueryForParentRelation = (
+  parentRelationId: number,
+  targetLevel: number,
+): string => {
+  return `
+[out:json][timeout:180];
+relation(${parentRelationId})->.p;
+map_to_area.p->.pa;
+relation["boundary"="administrative"]["admin_level"="${targetLevel}"](area.pa);
+out body center geom;
+`;
+};
+
 export const fetchOverpass = async (
   query: string,
 ): Promise<{ endpoint: string; data: Record<string, unknown>; rawText: string }> => {
@@ -221,4 +243,20 @@ export const extractAdminLevels = (payload: Record<string, unknown>): number[] =
   }
 
   return Array.from(levels).sort((a, b) => a - b);
+};
+
+export const extractRelationIds = (payload: Record<string, unknown>): number[] => {
+  const elements = Array.isArray(payload.elements)
+    ? (payload.elements as Array<Record<string, unknown>>)
+    : [];
+
+  const ids = new Set<number>();
+
+  for (const element of elements) {
+    if (String(element.type ?? "") !== "relation") continue;
+    const id = Number(element.id);
+    if (Number.isInteger(id) && id > 0) ids.add(id);
+  }
+
+  return Array.from(ids).sort((a, b) => a - b);
 };

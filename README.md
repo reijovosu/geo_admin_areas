@@ -37,6 +37,8 @@ Each backup file keeps all source API fields:
 
 Admin area backups are stored compressed as `CC_L{level}.json.gz`.
 
+For very large levels (for example large countries at deep admin levels), backup automatically falls back to chunked parent-area downloads. In that case, `CC_L{level}.raw.json` contains a chunk manifest and payload parts are saved as `CC_L{level}.raw.partN.json`.
+
 ## Install
 
 ```bash

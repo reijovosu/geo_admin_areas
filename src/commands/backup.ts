@@ -6,9 +6,12 @@ import {
   buildAllCountriesQuery,
   buildCountryLevelsQuery,
   buildOverpassQuery,
+  buildOverpassQueryForParentRelation,
+  buildParentRelationsQuery,
   extractAdminLevels,
   extractCountries,
   extractCountryCodes,
+  extractRelationIds,
   fetchOverpass,
 } from "../lib/overpass.js";
 import { isoUtcNow } from "../lib/time.js";
@@ -37,6 +40,15 @@ const formatError = (error: unknown): string => {
   } catch {
     return String(error);
   }
+};
+
+const isPayloadTooLargeError = (error: unknown): boolean => {
+  const msg = formatError(error);
+  return (
+    msg.includes("Cannot create a string longer than") ||
+    msg.includes("Invalid string length") ||
+    msg.includes("heap out of memory")
+  );
 };
 
 const resolveCreatedAt = (filePath: string, fallback: string): string => {
@@ -249,9 +261,89 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
         data = result.data;
         rawText = result.rawText;
       } catch (error) {
-        throw new Error(
-          `Failed country=${countryCode} level=${level}: ${formatError(error)}`,
+        if (!isPayloadTooLargeError(error) || level <= 2) {
+          throw new Error(
+            `Failed country=${countryCode} level=${level}: ${formatError(error)}`,
+          );
+        }
+
+        // Fallback for very large payloads: split by parent admin areas (level-2).
+        const parentLevel = Math.max(2, level - 2);
+        console.warn(
+          `Large payload for country=${countryCode} level=${level}; switching to chunked mode by parent level=${parentLevel}`,
         );
+
+        const parents = await fetchOverpass(buildParentRelationsQuery(countryCode, parentLevel));
+        const parentRelationIds = extractRelationIds(parents.data);
+        if (parentRelationIds.length === 0) {
+          throw new Error(
+            `Failed country=${countryCode} level=${level}: no parent relations found for parent level ${parentLevel}`,
+          );
+        }
+
+        const rowsByKey = new Map<string, BackupPayload["rows"][number]>();
+        const chunkFiles: string[] = [];
+        let firstEndpoint = parents.endpoint;
+
+        for (let i = 0; i < parentRelationIds.length; i++) {
+          const parentId = parentRelationIds[i];
+          console.log(
+            `Chunk ${i + 1}/${parentRelationIds.length} for country=${countryCode} level=${level} parent_relation=${parentId}`,
+          );
+          const chunk = await fetchOverpass(
+            buildOverpassQueryForParentRelation(parentId, level),
+          );
+          if (i === 0) firstEndpoint = chunk.endpoint;
+
+          const partRows = overpassToRows(countryCode, level, chunk.data);
+          for (const row of partRows) {
+            rowsByKey.set(`${row.osm_type}/${row.osm_id}`, row);
+          }
+
+          const partFile = `${countryCode}_L${level}.raw.part${i + 1}.json`;
+          fs.writeFileSync(path.join(outDirAbs, partFile), chunk.rawText, "utf-8");
+          chunkFiles.push(partFile);
+        }
+
+        endpoint = `${firstEndpoint} (chunked:parent_level=${parentLevel})`;
+        data = { chunked: true };
+        rawText = JSON.stringify(
+          {
+            chunked: true,
+            country_code: countryCode,
+            level,
+            parent_level: parentLevel,
+            chunks: chunkFiles,
+          },
+          null,
+          2,
+        );
+
+        const rows = Array.from(rowsByKey.values());
+        const createdAt = resolveCreatedAt(filePath, runTimestamp);
+        const refreshedAt = isoUtcNow();
+        const rawFileName = `${countryCode}_L${level}.raw.json`;
+
+        const payload: BackupPayload = {
+          meta: {
+            created_at: createdAt,
+            refreshed_at: refreshedAt,
+            country_code: countryCode,
+            level,
+            source: "overpass",
+            format: 2,
+            endpoint,
+          },
+          rows,
+          raw_api_response_file: rawFileName,
+        };
+
+        writeCompressedBackupJson(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+        fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+
+        console.log(`Saved ${filePath}.gz rows=${rows.length}`);
+        if (options.delayMs > 0) await sleep(options.delayMs);
+        continue;
       }
       const rows = overpassToRows(countryCode, level, data);
       const createdAt = resolveCreatedAt(filePath, runTimestamp);
