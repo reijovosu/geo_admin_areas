@@ -10,6 +10,25 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
+const formatError = (error: unknown): string => {
+  if (error instanceof Error) {
+    const causeMessage =
+      error.cause instanceof Error
+        ? error.cause.message
+        : error.cause != null
+          ? String(error.cause)
+          : "";
+    return causeMessage ? `${error.message} (cause: ${causeMessage})` : error.message;
+  }
+
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
+
 export const buildOverpassQuery = (countryCode: string, adminLevel: number): string => {
   return `
 [out:json][timeout:180];
@@ -44,10 +63,14 @@ export const fetchOverpass = async (
   query: string,
 ): Promise<{ endpoint: string; data: Record<string, unknown>; rawText: string }> => {
   let lastError: unknown = null;
+  let lastEndpoint = "";
+  let lastAttempt = 0;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        lastEndpoint = endpoint;
+        lastAttempt = attempt;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -84,12 +107,19 @@ export const fetchOverpass = async (
         return { endpoint, data: parsed, rawText: text };
       } catch (error) {
         lastError = error;
+        const msg = formatError(error);
+        console.warn(
+          `Overpass request failed endpoint=${endpoint} attempt=${attempt}/3 timeout_ms=${FETCH_TIMEOUT_MS} error=${msg}`,
+        );
         await sleep(800 * Math.pow(2, attempt - 1));
       }
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Overpass request failed");
+  const lastMessage = formatError(lastError);
+  throw new Error(
+    `Overpass request failed after all endpoints. Last endpoint=${lastEndpoint} attempt=${lastAttempt}/3 error=${lastMessage}`,
+  );
 };
 
 export const extractCountryCodes = (payload: Record<string, unknown>): string[] => {

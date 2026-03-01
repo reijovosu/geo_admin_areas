@@ -29,6 +29,16 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
+const formatError = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
+
 const resolveCreatedAt = (filePath: string, fallback: string): string => {
   if (!fs.existsSync(filePath)) return fallback;
 
@@ -230,7 +240,19 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
       console.log(`Fetching country=${countryCode} level=${level} ...`);
 
       const query = buildOverpassQuery(countryCode, level);
-      const { endpoint, data, rawText } = await fetchOverpass(query);
+      let endpoint: string;
+      let data: Record<string, unknown>;
+      let rawText: string;
+      try {
+        const result = await fetchOverpass(query);
+        endpoint = result.endpoint;
+        data = result.data;
+        rawText = result.rawText;
+      } catch (error) {
+        throw new Error(
+          `Failed country=${countryCode} level=${level}: ${formatError(error)}`,
+        );
+      }
       const rows = overpassToRows(countryCode, level, data);
       const createdAt = resolveCreatedAt(filePath, runTimestamp);
       const refreshedAt = isoUtcNow();
