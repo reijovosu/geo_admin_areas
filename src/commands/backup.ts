@@ -298,8 +298,10 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
         for (let i = 0; i < parentRelationIds.length; i++) {
           const parentId = parentRelationIds[i];
+          const chunkIndex = i + 1;
+          const chunkStartedAt = Date.now();
           console.log(
-            `Chunk ${i + 1}/${parentRelationIds.length} for country=${countryCode} level=${level} parent_relation=${parentId}`,
+            `Chunk ${chunkIndex}/${parentRelationIds.length} START country=${countryCode} level=${level} parent_relation=${parentId}`,
           );
           const chunk = await fetchOverpass(
             buildOverpassQueryForParentRelation(parentId, level),
@@ -307,13 +309,20 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           if (i === 0) firstEndpoint = chunk.endpoint;
 
           const partRows = overpassToRows(countryCode, level, chunk.data);
+          const beforeCount = rowsByKey.size;
           for (const row of partRows) {
             rowsByKey.set(`${row.osm_type}/${row.osm_id}`, row);
           }
+          const afterCount = rowsByKey.size;
+          const addedCount = Math.max(0, afterCount - beforeCount);
 
-          const partFile = `${countryCode}_L${level}.raw.part${i + 1}.json`;
+          const partFile = `${countryCode}_L${level}.raw.part${chunkIndex}.json`;
           fs.writeFileSync(path.join(outDirAbs, partFile), chunk.rawText, "utf-8");
           chunkFiles.push(partFile);
+          const chunkDurationSec = ((Date.now() - chunkStartedAt) / 1000).toFixed(1);
+          console.log(
+            `Chunk ${chunkIndex}/${parentRelationIds.length} DONE duration=${chunkDurationSec}s rows_fetched=${partRows.length} rows_added=${addedCount} rows_total=${afterCount}`,
+          );
         }
 
         endpoint = `${firstEndpoint} (chunked:parent_level=${parentLevel})`;
