@@ -218,6 +218,11 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
       const filePath = backupFilePath(outDirAbs, countryCode, level);
       const compressedFilePath = compressedBackupFilePath(filePath);
       if (missingOnlyMode && (fs.existsSync(filePath) || fs.existsSync(compressedFilePath))) {
+        if (fs.existsSync(filePath) && !fs.existsSync(compressedFilePath)) {
+          const content = fs.readFileSync(filePath, "utf-8");
+          writeCompressedBackupJson(filePath, content);
+          console.log(`Compressed existing file ${compressedFilePath}`);
+        }
         console.log(`Skipping existing file ${filePath}`);
         continue;
       }

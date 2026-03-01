@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.log
 *.raw.json
+data/[A-Za-z][A-Za-z]_L*.json
