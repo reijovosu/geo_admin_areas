@@ -51,6 +51,17 @@ const isPayloadTooLargeError = (error: unknown): boolean => {
   );
 };
 
+const shouldUseChunkFallback = (level: number, error: unknown): boolean => {
+  if (level <= 2) return false;
+  if (isPayloadTooLargeError(error)) return true;
+
+  // Deep admin levels often fail with transport-level issues before explicit size errors.
+  // For these, try chunked fallback proactively.
+  if (level >= 8) return true;
+
+  return false;
+};
+
 const resolveCreatedAt = (filePath: string, fallback: string): string => {
   if (!fs.existsSync(filePath)) return fallback;
 
@@ -261,7 +272,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
         data = result.data;
         rawText = result.rawText;
       } catch (error) {
-        if (!isPayloadTooLargeError(error) || level <= 2) {
+        if (!shouldUseChunkFallback(level, error)) {
           throw new Error(
             `Failed country=${countryCode} level=${level}: ${formatError(error)}`,
           );
