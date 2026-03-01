@@ -90,6 +90,21 @@ const writeCompressedBackupJson = (filePath: string, content: string): void => {
   fs.unlinkSync(filePath);
 };
 
+const chunkPartGlobPrefix = (countryCode: string, level: number): string =>
+  `${countryCode}_L${level}.raw.part`;
+
+const cleanupRawArtifacts = (outDirAbs: string, countryCode: string, level: number): void => {
+  const rawFile = rawResponseFilePath(outDirAbs, countryCode, level);
+  if (fs.existsSync(rawFile)) fs.unlinkSync(rawFile);
+
+  const prefix = chunkPartGlobPrefix(countryCode, level);
+  for (const fileName of fs.readdirSync(outDirAbs)) {
+    if (fileName.startsWith(prefix) && fileName.endsWith(".json")) {
+      fs.unlinkSync(path.join(outDirAbs, fileName));
+    }
+  }
+};
+
 const parseCountryCodesFromCountriesBackup = (filePath: string): string[] => {
   if (!fs.existsSync(filePath)) return [];
 
@@ -191,10 +206,15 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           endpoint: allCountriesResult.endpoint,
         },
         countries: extractCountries(allCountriesResult.data),
-        raw_api_response_file: "countries.raw.json",
+        raw_api_response_file: options.saveRaw ? "countries.raw.json" : null,
       };
 
-      fs.writeFileSync(path.join(outDirAbs, "countries.raw.json"), allCountriesResult.rawText, "utf-8");
+      const countriesRawPath = path.join(outDirAbs, "countries.raw.json");
+      if (options.saveRaw) {
+        fs.writeFileSync(countriesRawPath, allCountriesResult.rawText, "utf-8");
+      } else if (fs.existsSync(countriesRawPath)) {
+        fs.unlinkSync(countriesRawPath);
+      }
 
       fs.writeFileSync(
         countriesFilePath,
@@ -317,8 +337,10 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           const addedCount = Math.max(0, afterCount - beforeCount);
 
           const partFile = `${countryCode}_L${level}.raw.part${chunkIndex}.json`;
-          fs.writeFileSync(path.join(outDirAbs, partFile), chunk.rawText, "utf-8");
-          chunkFiles.push(partFile);
+          if (options.saveRaw) {
+            fs.writeFileSync(path.join(outDirAbs, partFile), chunk.rawText, "utf-8");
+            chunkFiles.push(partFile);
+          }
           const chunkDurationSec = ((Date.now() - chunkStartedAt) / 1000).toFixed(1);
           console.log(
             `Chunk ${chunkIndex}/${parentRelationIds.length} DONE duration=${chunkDurationSec}s rows_fetched=${partRows.length} rows_added=${addedCount} rows_total=${afterCount}`,
@@ -355,11 +377,15 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
             endpoint,
           },
           rows,
-          raw_api_response_file: rawFileName,
+          raw_api_response_file: options.saveRaw ? rawFileName : null,
         };
 
         writeCompressedBackupJson(filePath, `${JSON.stringify(payload, null, 2)}\n`);
-        fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+        if (options.saveRaw) {
+          fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+        } else {
+          cleanupRawArtifacts(outDirAbs, countryCode, level);
+        }
 
         console.log(`Saved ${filePath}.gz rows=${rows.length}`);
         if (options.delayMs > 0) await sleep(options.delayMs);
@@ -381,11 +407,15 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           endpoint,
         },
         rows,
-        raw_api_response_file: rawFileName,
+        raw_api_response_file: options.saveRaw ? rawFileName : null,
       };
 
       writeCompressedBackupJson(filePath, `${JSON.stringify(payload, null, 2)}\n`);
-      fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+      if (options.saveRaw) {
+        fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+      } else {
+        cleanupRawArtifacts(outDirAbs, countryCode, level);
+      }
 
       console.log(`Saved ${filePath}.gz rows=${rows.length}`);
       if (options.delayMs > 0) {

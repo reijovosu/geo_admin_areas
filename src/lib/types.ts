@@ -24,7 +24,7 @@ export interface BackupRow {
 export interface BackupPayload {
   meta: BackupMeta;
   rows: BackupRow[];
-  raw_api_response_file: string;
+  raw_api_response_file: string | null;
 }
 
 export interface CountriesMeta {
@@ -47,7 +47,7 @@ export interface CountryItem {
 export interface CountriesPayload {
   meta: CountriesMeta;
   countries: CountryItem[];
-  raw_api_response_file: string;
+  raw_api_response_file: string | null;
 }
 
 export interface BackupOptions {
@@ -55,6 +55,7 @@ export interface BackupOptions {
   allCountries: boolean;
   levels: number[];
   allLevels: boolean;
+  saveRaw: boolean;
   outDir: string;
   delayMs: number;
 }

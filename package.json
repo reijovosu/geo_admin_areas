@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "backup": "NODE_OPTIONS=--max-old-space-size=${GEO_BACKUP_NODE_MB:-12288} tsx src/index.ts backup",
-    "backup:global": "NODE_OPTIONS=--max-old-space-size=${GEO_BACKUP_NODE_MB:-12288} tsx src/index.ts backup --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400",
+    "backup": "NODE_OPTIONS=--max-old-space-size=${GEO_BACKUP_NODE_MB:-12288} tsx src/index.ts backup --save-raw=0",
+    "backup:global": "NODE_OPTIONS=--max-old-space-size=${GEO_BACKUP_NODE_MB:-12288} tsx src/index.ts backup --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400 --save-raw=0",
     "backups:zip": "bash ./scripts/zip-admin-backups.sh",
     "backup:global:push": "bash ./scripts/backup-and-push.sh",
     "serve": "tsx src/index.ts serve"

@@ -31,13 +31,15 @@ It saves files in this format:
 
 Each backup file keeps all source API fields:
 
-- full Overpass response in a separate `*.raw.json` file, referenced by `raw_api_response_file`
+- optional full Overpass response in a separate `*.raw.json` file, referenced by `raw_api_response_file`
 - matched raw element reference per row in `raw_api_ref` (for example `relation/79510`)
 - transformed row fields (`name`, `tags`, `geom_geojson`, `center_geojson`, etc.)
 
 Admin area backups are stored compressed as `CC_L{level}.json.gz`.
 
-For very large levels (for example large countries at deep admin levels), backup automatically falls back to chunked parent-area downloads. In that case, `CC_L{level}.raw.json` contains a chunk manifest and payload parts are saved as `CC_L{level}.raw.partN.json`.
+For very large levels (for example large countries at deep admin levels), backup automatically falls back to chunked parent-area downloads.
+
+By default (`--save-raw=0`), raw files are not kept and temporary chunk part files are deleted after successful merge.
 
 ## Install
 
@@ -110,6 +112,7 @@ npm run backup:global:push
 - `--all-levels`: `1|true|yes` to auto-discover all admin levels for each country
 - `--out-dir`: output directory (default `./data`)
 - `--delay-ms`: delay between requests in milliseconds (default `300`)
+- `--save-raw`: `1|true|yes` to keep `*.raw.json` files (default `0`)
 
 ## Serve Backups as JSON API
 
@@ -191,6 +194,6 @@ What it does:
       "raw_api_ref": "relation/79510"
     }
   ],
-  "raw_api_response_file": "EE_L2.raw.json"
+  "raw_api_response_file": null
 }
 ```
