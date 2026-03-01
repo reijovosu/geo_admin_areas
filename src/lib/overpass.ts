@@ -74,8 +74,8 @@ export const buildOverpassQueryForParentRelation = (
 ): string => {
   return `
 [out:json][timeout:180];
-relation(${parentRelationId})->.p;
-map_to_area.p->.pa;
+relation(${parentRelationId});
+map_to_area->.pa;
 relation["boundary"="administrative"]["admin_level"="${targetLevel}"](area.pa);
 out body center geom;
 `;
