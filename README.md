@@ -26,6 +26,7 @@ It saves files in this format:
 - `EE_L2.json`
 - `EE_L6.json`
 - `US_L4.json`
+- `EE_L2.json.gz` (compressed admin backups)
 - `countries.json`
 
 Each backup file keeps all source API fields:
@@ -33,6 +34,8 @@ Each backup file keeps all source API fields:
 - full Overpass response in a separate `*.raw.json` file, referenced by `raw_api_response_file`
 - matched raw element reference per row in `raw_api_ref` (for example `relation/79510`)
 - transformed row fields (`name`, `tags`, `geom_geojson`, `center_geojson`, etc.)
+
+Admin area backups are stored compressed as `CC_L{level}.json.gz`.
 
 ## Install
 
@@ -64,11 +67,20 @@ npm run backup -- --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=4
 
 In this full-global mode, existing `data/[COUNTRY]_L[level].json` files are skipped.  
 Only missing files are downloaded.
+Skip check also accepts existing `data/[COUNTRY]_L[level].json.gz`.
+
+To avoid repeated slow level-discovery calls, full-global missing-only mode caches discovered levels in `data/country-levels.json` and reuses that on next runs.
 
 Equivalent script:
 
 ```bash
 npm run backup:global
+```
+
+Compress existing legacy plain JSON backups:
+
+```bash
+npm run backups:zip
 ```
 
 Memory tuning:
@@ -102,6 +114,8 @@ npm run backup:global:push
 ```bash
 npm run serve -- --data-dir=./data --host=127.0.0.1 --port=8787
 ```
+
+If a backup exists only as `*.json.gz`, server automatically extracts `*.json` on demand and serves it.
 
 API routes:
 
@@ -143,9 +157,10 @@ npm run backup:global:push
 What it does:
 
 1. Runs full backup (`npm run backup:global`)
-2. Stages `data/`
-3. Commits only if there are changes
-4. Pushes to your current branch remote
+2. Compresses any plain admin backup JSON files (`npm run backups:zip`)
+3. Stages `data/`
+4. Commits only if there are changes
+5. Pushes to your current branch remote
 
 ## Example backup file
 

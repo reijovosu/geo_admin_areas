@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { gunzipSync } from "node:zlib";
 import { backupFilePath, readJsonFile } from "../lib/fs.js";
 import type { BackupPayload, CountriesPayload, ServeOptions } from "../lib/types.js";
 
@@ -21,10 +22,34 @@ const sendJson = (res: http.ServerResponse, statusCode: number, payload: unknown
 
 const listBackupFiles = (dataDir: string): string[] => {
   if (!fs.existsSync(dataDir)) return [];
-  return fs
-    .readdirSync(dataDir)
-    .filter((name) => /^([A-Z]{2})_L\d+\.json$/i.test(name))
-    .sort();
+  const out = new Set<string>();
+
+  for (const name of fs.readdirSync(dataDir)) {
+    const matchJson = name.match(/^([A-Z]{2})_L(\d+)\.json$/i);
+    if (matchJson) {
+      out.add(`${matchJson[1].toUpperCase()}_L${Number(matchJson[2])}.json`);
+      continue;
+    }
+
+    const matchGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz$/i);
+    if (matchGz) {
+      out.add(`${matchGz[1].toUpperCase()}_L${Number(matchGz[2])}.json`);
+    }
+  }
+
+  return Array.from(out).sort();
+};
+
+const ensureJsonFromGzip = (jsonFilePath: string): boolean => {
+  if (fs.existsSync(jsonFilePath)) return true;
+
+  const gzFilePath = `${jsonFilePath}.gz`;
+  if (!fs.existsSync(gzFilePath)) return false;
+
+  const gzBuffer = fs.readFileSync(gzFilePath);
+  const jsonText = gunzipSync(gzBuffer).toString("utf-8");
+  fs.writeFileSync(jsonFilePath, jsonText, "utf-8");
+  return true;
 };
 
 const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
@@ -44,8 +69,11 @@ const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
   const match = file.match(/^([A-Z]{2})_L(\d+)\.json$/i);
   if (!match) return null;
 
-  const parsed = readJsonFile<BackupPayload>(path.join(dataDir, file));
-  const stat = fs.statSync(path.join(dataDir, file));
+  const jsonPath = path.join(dataDir, file);
+  if (!ensureJsonFromGzip(jsonPath)) return null;
+
+  const parsed = readJsonFile<BackupPayload>(jsonPath);
+  const stat = fs.statSync(jsonPath);
 
   return {
     file,
@@ -112,7 +140,7 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       }
 
       const filePath = backupFilePath(dataDir, country, level);
-      if (!fs.existsSync(filePath)) {
+      if (!ensureJsonFromGzip(filePath)) {
         sendJson(res, 404, { error: `Backup not found for ${country} L${level}` });
         return;
       }
@@ -127,7 +155,7 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       const level = Number(routeMatch[2]);
       const filePath = backupFilePath(dataDir, country, level);
 
-      if (!fs.existsSync(filePath)) {
+      if (!ensureJsonFromGzip(filePath)) {
         sendJson(res, 404, { error: `Backup not found for ${country} L${level}` });
         return;
       }

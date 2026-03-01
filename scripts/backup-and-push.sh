@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 npm run backup:global
+npm run backups:zip
 
 git add data
 
