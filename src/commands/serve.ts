@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import { gunzipSync } from "node:zlib";
-import { backupFilePath, readJsonFile } from "../lib/fs.js";
+import {
+  backupFilePath,
+  readCompressedBackupBuffer,
+  readJsonFile,
+} from "../lib/fs.js";
 import type { BackupPayload, CountriesPayload, ServeOptions } from "../lib/types.js";
 
 interface BackupIndexItem {
@@ -209,6 +213,12 @@ const listBackupFiles = (dataDir: string): string[] => {
     const matchGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz$/i);
     if (matchGz) {
       out.add(`${matchGz[1].toUpperCase()}_L${Number(matchGz[2])}.json`);
+      continue;
+    }
+
+    const matchSplitGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz\.part-\d+$/i);
+    if (matchSplitGz) {
+      out.add(`${matchSplitGz[1].toUpperCase()}_L${Number(matchSplitGz[2])}.json`);
     }
   }
 
@@ -227,10 +237,9 @@ const listCountryLevels = (dataDir: string, countryCode: string): number[] => {
 const ensureJsonFromGzip = (jsonFilePath: string): boolean => {
   if (fs.existsSync(jsonFilePath)) return true;
 
-  const gzFilePath = `${jsonFilePath}.gz`;
-  if (!fs.existsSync(gzFilePath)) return false;
+  const gzBuffer = readCompressedBackupBuffer(jsonFilePath);
+  if (!gzBuffer) return false;
 
-  const gzBuffer = fs.readFileSync(gzFilePath);
   const jsonText = gunzipSync(gzBuffer).toString("utf-8");
   fs.writeFileSync(jsonFilePath, jsonText, "utf-8");
   return true;

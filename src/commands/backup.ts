@@ -1,7 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
-import { ensureDir, backupFilePath } from "../lib/fs.js";
+import { gunzipSync, gzipSync } from "node:zlib";
+import {
+  ensureDir,
+  backupFilePath,
+  compressedBackupExists,
+  readCompressedBackupBuffer,
+  writeCompressedBackupArtifacts,
+} from "../lib/fs.js";
 import {
   buildAllCountriesQuery,
   buildCountryLevelsQuery,
@@ -63,10 +69,14 @@ const shouldUseChunkFallback = (level: number, error: unknown): boolean => {
 };
 
 const resolveCreatedAt = (filePath: string, fallback: string): string => {
-  if (!fs.existsSync(filePath)) return fallback;
-
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
+    const raw = fs.existsSync(filePath)
+      ? fs.readFileSync(filePath, "utf-8")
+      : (() => {
+        const gzBuffer = readCompressedBackupBuffer(filePath);
+        return gzBuffer ? gunzipSync(gzBuffer).toString("utf-8") : null;
+      })();
+    if (!raw) return fallback;
     const parsed = JSON.parse(raw) as { meta?: { created_at?: unknown } };
     if (typeof parsed?.meta?.created_at === "string" && parsed.meta.created_at.trim()) {
       return parsed.meta.created_at;
@@ -82,13 +92,13 @@ const rawResponseFilePath = (outDirAbs: string, countryCode: string, level: numb
   return path.join(outDirAbs, `${countryCode}_L${level}.raw.json`);
 };
 
-const compressedBackupFilePath = (filePath: string): string => `${filePath}.gz`;
-
 const writeCompressedBackupJson = (filePath: string, content: string): void => {
   fs.writeFileSync(filePath, content, "utf-8");
-  fs.writeFileSync(compressedBackupFilePath(filePath), gzipSync(content, { level: 9 }));
+  writeCompressedBackupArtifacts(filePath, gzipSync(content, { level: 9 }));
   fs.unlinkSync(filePath);
 };
+
+const serializeCompressedJson = (payload: unknown): string => `${JSON.stringify(payload)}\n`;
 
 const chunkPartGlobPrefix = (countryCode: string, level: number): string =>
   `${countryCode}_L${level}.raw.part`;
@@ -269,12 +279,11 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
     for (const level of levelsForCountry) {
       const filePath = backupFilePath(outDirAbs, countryCode, level);
-      const compressedFilePath = compressedBackupFilePath(filePath);
-      if (missingOnlyMode && (fs.existsSync(filePath) || fs.existsSync(compressedFilePath))) {
-        if (fs.existsSync(filePath) && !fs.existsSync(compressedFilePath)) {
+      if (missingOnlyMode && (fs.existsSync(filePath) || compressedBackupExists(filePath))) {
+        if (fs.existsSync(filePath) && !compressedBackupExists(filePath)) {
           const content = fs.readFileSync(filePath, "utf-8");
           writeCompressedBackupJson(filePath, content);
-          console.log(`Compressed existing file ${compressedFilePath}`);
+          console.log(`Compressed existing file ${filePath}.gz`);
         }
         console.log(`Skipping existing file ${filePath}`);
         continue;
@@ -380,7 +389,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           raw_api_response_file: options.saveRaw ? rawFileName : null,
         };
 
-        writeCompressedBackupJson(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+        writeCompressedBackupJson(filePath, serializeCompressedJson(payload));
         if (options.saveRaw) {
           fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
         } else {
@@ -410,7 +419,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
         raw_api_response_file: options.saveRaw ? rawFileName : null,
       };
 
-      writeCompressedBackupJson(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+      writeCompressedBackupJson(filePath, serializeCompressedJson(payload));
       if (options.saveRaw) {
         fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
       } else {
