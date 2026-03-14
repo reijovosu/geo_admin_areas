@@ -18,10 +18,14 @@ const formatError = (error: unknown): string => {
         : error.cause != null
           ? String(error.cause)
           : "";
-    return causeMessage ? `${error.message} (cause: ${causeMessage})` : error.message;
+
+    return causeMessage
+      ? `${error.message} (cause: ${causeMessage})`
+      : error.message;
   }
 
   if (typeof error === "string") return error;
+
   try {
     return JSON.stringify(error);
   } catch {
@@ -29,43 +33,73 @@ const formatError = (error: unknown): string => {
   }
 };
 
-export const buildOverpassQuery = (countryCode: string, adminLevel: number): string => {
+export const buildOverpassQuery = (
+  countryCode: string,
+  adminLevel: number,
+): string => {
+  if (adminLevel === 2) {
+    return `
+      [out:json][timeout:180];
+      relation
+        ["boundary"="administrative"]
+        ["admin_level"="2"]
+        ["ISO3166-1"="${countryCode}"];
+      out body center geom;
+    `;
+  }
+
   return `
-[out:json][timeout:180];
-area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
-(
-  relation["boundary"="administrative"]["admin_level"="${adminLevel}"](area.country);
-);
-out body center geom;
-`;
+    [out:json][timeout:180];
+    area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
+    (
+      relation["boundary"="administrative"]["admin_level"="${adminLevel}"](area.country);
+    );
+    out body center geom;
+  `;
 };
 
 export const buildAllCountriesQuery = (): string => {
   return `
-[out:json][timeout:180];
-relation["boundary"="administrative"]["admin_level"="2"]["ISO3166-1"];
-out tags;
-`;
+    [out:json][timeout:180];
+    relation["boundary"="administrative"]["admin_level"="2"]["ISO3166-1"];
+    out tags;
+  `;
 };
 
 export const buildCountryLevelsQuery = (countryCode: string): string => {
   return `
-[out:json][timeout:180];
-area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
-(
-  relation["boundary"="administrative"]["admin_level"](area.country);
-);
-out tags;
-`;
+    [out:json][timeout:180];
+    (
+      relation
+        ["boundary"="administrative"]
+        ["admin_level"]
+        ["ISO3166-1"="${countryCode}"];
+    );
+    out tags;
+  `;
 };
 
-export const buildParentRelationsQuery = (countryCode: string, parentLevel: number): string => {
+export const buildParentRelationsQuery = (
+  countryCode: string,
+  parentLevel: number,
+): string => {
+  if (parentLevel === 2) {
+    return `
+      [out:json][timeout:180];
+      relation
+        ["boundary"="administrative"]
+        ["admin_level"="2"]
+        ["ISO3166-1"="${countryCode}"];
+      out ids;
+    `;
+  }
+
   return `
-[out:json][timeout:180];
-area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
-relation["boundary"="administrative"]["admin_level"="${parentLevel}"](area.country);
-out ids;
-`;
+    [out:json][timeout:180];
+    area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
+    relation["boundary"="administrative"]["admin_level"="${parentLevel}"](area.country);
+    out ids;
+  `;
 };
 
 export const buildOverpassQueryForParentRelation = (
@@ -73,17 +107,21 @@ export const buildOverpassQueryForParentRelation = (
   targetLevel: number,
 ): string => {
   return `
-[out:json][timeout:180];
-relation(${parentRelationId});
-map_to_area->.pa;
-relation["boundary"="administrative"]["admin_level"="${targetLevel}"](area.pa);
-out body center geom;
-`;
+    [out:json][timeout:180];
+    relation(${parentRelationId});
+    map_to_area->.pa;
+    relation["boundary"="administrative"]["admin_level"="${targetLevel}"](area.pa);
+    out body center geom;
+  `;
 };
 
 export const fetchOverpass = async (
   query: string,
-): Promise<{ endpoint: string; data: Record<string, unknown>; rawText: string }> => {
+): Promise<{
+  endpoint: string;
+  data: Record<string, unknown>;
+  rawText: string;
+}> => {
   let lastError: unknown = null;
   let lastEndpoint = "";
   let lastAttempt = 0;
@@ -93,6 +131,7 @@ export const fetchOverpass = async (
       try {
         lastEndpoint = endpoint;
         lastAttempt = attempt;
+
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -115,13 +154,15 @@ export const fetchOverpass = async (
         }
 
         if (!response.ok) {
-          throw new Error(`Overpass ${response.status} ${endpoint}: ${text.slice(0, 240)}`);
+          throw new Error(
+            `Overpass ${response.status} ${endpoint}: ${text.slice(0, 240)}`,
+          );
         }
 
         const startsLikeXml = /^\s*</.test(text);
-        if (startsLikeXml || (!ct.includes("json") && !text.trim().startsWith("{"))) {
+        if (startsLikeXml || ct.includes("xml") || ct.includes("html")) {
           throw new Error(
-            `Overpass non-JSON response (${endpoint}): ${text.slice(0, 200)}`,
+            `Overpass non-JSON response from ${endpoint}: ${text.slice(0, 240)}`,
           );
         }
 
@@ -144,11 +185,12 @@ export const fetchOverpass = async (
   );
 };
 
-export const extractCountryCodes = (payload: Record<string, unknown>): string[] => {
+export const extractCountryCodes = (
+  payload: Record<string, unknown>,
+): string[] => {
   const elements = Array.isArray(payload.elements)
     ? (payload.elements as Array<Record<string, unknown>>)
     : [];
-
   const countryCodes = new Set<string>();
 
   for (const element of elements) {
@@ -158,7 +200,9 @@ export const extractCountryCodes = (payload: Record<string, unknown>): string[] 
         : null;
     if (!tags) continue;
 
-    const iso2 = String(tags["ISO3166-1"] ?? "").trim().toUpperCase();
+    const iso2 = String(tags["ISO3166-1"] ?? "")
+      .trim()
+      .toUpperCase();
     if (/^[A-Z]{2}$/.test(iso2)) {
       countryCodes.add(iso2);
     }
@@ -180,7 +224,6 @@ export const extractCountries = (
   const elements = Array.isArray(payload.elements)
     ? (payload.elements as Array<Record<string, unknown>>)
     : [];
-
   const byCode = new Map<
     string,
     {
@@ -200,7 +243,9 @@ export const extractCountries = (
         : null;
     if (!tags) continue;
 
-    const iso2 = String(tags["ISO3166-1"] ?? "").trim().toUpperCase();
+    const iso2 = String(tags["ISO3166-1"] ?? "")
+      .trim()
+      .toUpperCase();
     if (!/^[A-Z]{2}$/.test(iso2)) continue;
 
     const toName = (value: unknown): string | null => {
@@ -218,14 +263,17 @@ export const extractCountries = (
     });
   }
 
-  return Array.from(byCode.values()).sort((a, b) => a.country_code.localeCompare(b.country_code));
+  return Array.from(byCode.values()).sort((a, b) =>
+    a.country_code.localeCompare(b.country_code),
+  );
 };
 
-export const extractAdminLevels = (payload: Record<string, unknown>): number[] => {
+export const extractAdminLevels = (
+  payload: Record<string, unknown>,
+): number[] => {
   const elements = Array.isArray(payload.elements)
     ? (payload.elements as Array<Record<string, unknown>>)
     : [];
-
   const levels = new Set<number>();
 
   for (const element of elements) {
@@ -237,6 +285,7 @@ export const extractAdminLevels = (payload: Record<string, unknown>): number[] =
 
     const levelRaw = String(tags.admin_level ?? "").trim();
     const level = Number(levelRaw);
+
     if (Number.isInteger(level) && level > 0) {
       levels.add(level);
     }
@@ -245,11 +294,12 @@ export const extractAdminLevels = (payload: Record<string, unknown>): number[] =
   return Array.from(levels).sort((a, b) => a - b);
 };
 
-export const extractRelationIds = (payload: Record<string, unknown>): number[] => {
+export const extractRelationIds = (
+  payload: Record<string, unknown>,
+): number[] => {
   const elements = Array.isArray(payload.elements)
     ? (payload.elements as Array<Record<string, unknown>>)
     : [];
-
   const ids = new Set<number>();
 
   for (const element of elements) {
