@@ -2,6 +2,18 @@ import { parseCSVArg, parseIntList, parseList, parseNumber, parseString } from "
 import { runBackup } from "./commands/backup.js";
 import { runServer } from "./commands/serve.js";
 
+const envOrFallback = (name: string, fallback: string): string => {
+  const value = process.env[name]?.trim();
+  return value && value.length > 0 ? value : fallback;
+};
+
+const envNumberOrFallback = (name: string, fallback: number): number => {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const main = async (): Promise<void> => {
   const [, , command = "help", ...args] = process.argv;
 
@@ -32,9 +44,9 @@ const main = async (): Promise<void> => {
   }
 
   if (command === "serve") {
-    const dataDir = parseString(args, "data-dir", "./data");
-    const host = parseString(args, "host", "127.0.0.1");
-    const port = parseNumber(args, "port", 8787);
+    const dataDir = parseString(args, "data-dir", envOrFallback("DATA_DIR", "./data"));
+    const host = parseString(args, "host", envOrFallback("HOST", "127.0.0.1"));
+    const port = parseNumber(args, "port", envNumberOrFallback("PORT", 8787));
 
     await runServer({
       dataDir,

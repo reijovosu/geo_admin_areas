@@ -47,6 +47,85 @@ By default (`--save-raw=0`), raw files are not kept and temporary chunk part fil
 npm install
 ```
 
+## Docker image
+
+GitHub Actions publishes a multi-arch image to GHCR for:
+
+- `linux/amd64`
+- `linux/arm64`
+
+Image name:
+
+```bash
+ghcr.io/reijovosu/geo_admin_areas
+```
+
+Published tags:
+
+- `:latest` points to the newest successful `main` build
+- `:<commit_sha>` points to the exact source commit that built the image
+
+Pull the newest published image:
+
+```bash
+docker pull ghcr.io/reijovosu/geo_admin_areas:latest
+```
+
+Run the API container:
+
+```bash
+docker run -d \
+  --name geo-admin-areas \
+  --pull always \
+  -p 8787:8787 \
+  ghcr.io/reijovosu/geo_admin_areas:latest
+```
+
+Use an exact immutable image version:
+
+```bash
+docker run -d \
+  --name geo-admin-areas \
+  -p 8787:8787 \
+  ghcr.io/reijovosu/geo_admin_areas:<commit_sha>
+```
+
+Container environment variables:
+
+- `HOST` default: `0.0.0.0`
+- `PORT` default: `8787`
+- `DATA_DIR` default: `/app/data`
+
+Example with a custom port:
+
+```bash
+docker run -d \
+  --name geo-admin-areas \
+  --pull always \
+  -e PORT=8080 \
+  -p 8080:8080 \
+  ghcr.io/reijovosu/geo_admin_areas:latest
+```
+
+If you want Docker to check for a newer `:latest` image every time you start the container manually, use `--pull always` with `docker run`.
+
+If you use Docker Compose, the equivalent is:
+
+```yaml
+services:
+  geo-admin-areas:
+    image: ghcr.io/reijovosu/geo_admin_areas:latest
+    pull_policy: always
+    ports:
+      - "8787:8787"
+```
+
+Then start it with:
+
+```bash
+docker compose up -d
+```
+
 ## Run Backups
 
 Selected countries and levels:
