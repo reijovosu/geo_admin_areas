@@ -122,11 +122,19 @@ npm run serve -- --data-dir=./data --host=127.0.0.1 --port=8787
 
 If a backup exists only as `*.json.gz`, server automatically extracts `*.json` on demand and serves it.
 
+When the server starts, it prints:
+
+- Swagger UI: `http://127.0.0.1:8787/docs`
+- OpenAPI JSON: `http://127.0.0.1:8787/openapi.json`
+
 API routes:
 
+- `GET /docs`
+- `GET /openapi.json`
 - `GET /health`
 - `GET /countries`
 - `GET /backups`
+- `GET /admin-areas?country=EE`
 - `GET /admin-areas?country=EE&level=2`
 - `GET /admin-areas/EE/2`
 

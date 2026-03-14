@@ -14,11 +14,186 @@ interface BackupIndexItem {
   updated_at: string;
 }
 
+const sendHtml = (res: http.ServerResponse, statusCode: number, html: string): void => {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.end(html);
+};
+
 const sendJson = (res: http.ServerResponse, statusCode: number, payload: unknown): void => {
   res.statusCode = statusCode;
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(`${JSON.stringify(payload, null, 2)}\n`);
 };
+
+const createOpenApiDocument = (baseUrl: string) => ({
+  openapi: "3.0.3",
+  info: {
+    title: "Geo Admin Areas API",
+    version: "1.0.0",
+    description: "API for browsing country and admin area backup snapshots.",
+  },
+  servers: [
+    {
+      url: baseUrl,
+      description: "Local server",
+    },
+  ],
+  tags: [
+    { name: "System" },
+    { name: "Catalog" },
+    { name: "Admin Areas" },
+  ],
+  paths: {
+    "/health": {
+      get: {
+        tags: ["System"],
+        summary: "Health check",
+        responses: {
+          "200": {
+            description: "Server status",
+          },
+        },
+      },
+    },
+    "/backups": {
+      get: {
+        tags: ["Catalog"],
+        summary: "List available backup files",
+        responses: {
+          "200": {
+            description: "Available backup entries",
+          },
+        },
+      },
+    },
+    "/countries": {
+      get: {
+        tags: ["Catalog"],
+        summary: "Return the countries catalog",
+        responses: {
+          "200": {
+            description: "Countries dataset",
+          },
+          "404": {
+            description: "countries.json is missing",
+          },
+        },
+      },
+    },
+    "/admin-areas": {
+      get: {
+        tags: ["Admin Areas"],
+        summary: "Lookup admin area levels or a specific backup",
+        parameters: [
+          {
+            name: "country",
+            in: "query",
+            required: true,
+            description: "Two-letter ISO country code, for example EE",
+            schema: {
+              type: "string",
+              example: "EE",
+            },
+          },
+          {
+            name: "level",
+            in: "query",
+            required: false,
+            description: "Admin level number. Omit to list available levels.",
+            schema: {
+              type: "integer",
+              example: 2,
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Levels list or admin area backup payload",
+          },
+          "400": {
+            description: "Missing or invalid query params",
+          },
+          "404": {
+            description: "No data found for the requested country or level",
+          },
+        },
+      },
+    },
+    "/admin-areas/{country}/{level}": {
+      get: {
+        tags: ["Admin Areas"],
+        summary: "Return a specific admin area backup",
+        parameters: [
+          {
+            name: "country",
+            in: "path",
+            required: true,
+            description: "Two-letter ISO country code",
+            schema: {
+              type: "string",
+              example: "EE",
+            },
+          },
+          {
+            name: "level",
+            in: "path",
+            required: true,
+            description: "Admin level number",
+            schema: {
+              type: "integer",
+              example: 2,
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Admin area backup payload",
+          },
+          "404": {
+            description: "Backup file not found",
+          },
+        },
+      },
+    },
+  },
+});
+
+const createSwaggerHtml = (specUrl: string) => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Geo Admin Areas API Docs</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css"
+    />
+    <style>
+      html, body {
+        margin: 0;
+        background: #f5f7fb;
+      }
+
+      .topbar {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: ${JSON.stringify(specUrl)},
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        displayRequestDuration: true,
+        persistAuthorization: false
+      });
+    </script>
+  </body>
+</html>`;
 
 const listBackupFiles = (dataDir: string): string[] => {
   if (!fs.existsSync(dataDir)) return [];
@@ -38,6 +213,15 @@ const listBackupFiles = (dataDir: string): string[] => {
   }
 
   return Array.from(out).sort();
+};
+
+const listCountryLevels = (dataDir: string, countryCode: string): number[] => {
+  const country = countryCode.toUpperCase();
+  return listBackupFiles(dataDir)
+    .map((file) => file.match(/^([A-Z]{2})_L(\d+)\.json$/i))
+    .filter((match): match is RegExpMatchArray => match !== null && match[1].toUpperCase() === country)
+    .map((match) => Number(match[2]))
+    .sort((a, b) => a - b);
 };
 
 const ensureJsonFromGzip = (jsonFilePath: string): boolean => {
@@ -87,6 +271,9 @@ const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
 
 export const runServer = async (options: ServeOptions): Promise<void> => {
   const dataDir = path.resolve(process.cwd(), options.dataDir);
+  const baseUrl = `http://${options.host}:${options.port}`;
+  const docsUrl = `${baseUrl}/docs`;
+  const openApiUrl = `${baseUrl}/openapi.json`;
 
   const server = http.createServer((req, res) => {
     if (!req.url) {
@@ -101,6 +288,16 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
         ok: true,
         data_dir: dataDir,
       });
+      return;
+    }
+
+    if (url.pathname === "/openapi.json") {
+      sendJson(res, 200, createOpenApiDocument(baseUrl));
+      return;
+    }
+
+    if (url.pathname === "/docs") {
+      sendHtml(res, 200, createSwaggerHtml(openApiUrl));
       return;
     }
 
@@ -130,11 +327,34 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
 
     if (url.pathname === "/admin-areas") {
       const country = String(url.searchParams.get("country") ?? "").toUpperCase();
-      const level = Number(url.searchParams.get("level") ?? NaN);
+      const levelRaw = url.searchParams.get("level");
 
-      if (!country || !Number.isFinite(level)) {
+      if (!country) {
         sendJson(res, 400, {
-          error: "Provide query params: country=EE&level=2",
+          error: "Provide query params: country=EE or country=EE&level=2",
+        });
+        return;
+      }
+
+      if (levelRaw === null) {
+        const levels = listCountryLevels(dataDir, country);
+        if (levels.length === 0) {
+          sendJson(res, 404, { error: `No backups found for ${country}` });
+          return;
+        }
+
+        sendJson(res, 200, {
+          country_code: country,
+          levels,
+          count: levels.length,
+        });
+        return;
+      }
+
+      const level = Number(levelRaw);
+      if (!Number.isFinite(level)) {
+        sendJson(res, 400, {
+          error: "Invalid level. Provide query params: country=EE&level=2",
         });
         return;
       }
@@ -167,9 +387,12 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
     sendJson(res, 404, {
       error: "Not found",
       routes: [
+        "/docs",
+        "/openapi.json",
         "/health",
         "/countries",
         "/backups",
+        "/admin-areas?country=EE",
         "/admin-areas?country=EE&level=2",
         "/admin-areas/EE/2",
       ],
@@ -179,7 +402,9 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
     server.on("error", reject);
     server.listen(options.port, options.host, () => {
-      console.log(`Server listening on http://${options.host}:${options.port}`);
+      console.log(`Server listening on ${baseUrl}`);
+      console.log(`Swagger docs: ${docsUrl}`);
+      console.log(`OpenAPI spec: ${openApiUrl}`);
       console.log(`Data dir: ${dataDir}`);
       resolve();
     });
