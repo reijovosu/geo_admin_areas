@@ -69,12 +69,11 @@ export const buildAllCountriesQuery = (): string => {
 export const buildCountryLevelsQuery = (countryCode: string): string => {
   return `
     [out:json][timeout:180];
-    (
-      relation
-        ["boundary"="administrative"]
-        ["admin_level"]
-        ["ISO3166-1"="${countryCode}"];
-    );
+    area["ISO3166-1"="${countryCode}"]["admin_level"="2"]->.country;
+    relation
+      ["boundary"="administrative"]
+      ["admin_level"]
+      (area.country);
     out tags;
   `;
 };

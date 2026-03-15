@@ -55,6 +55,8 @@ export interface BackupOptions {
   allCountries: boolean;
   levels: number[];
   allLevels: boolean;
+  force: boolean;
+  staleDays: number;
   saveRaw: boolean;
   outDir: string;
   delayMs: number;

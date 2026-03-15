@@ -160,6 +160,18 @@ Equivalent script:
 npm run backup:global
 ```
 
+Refresh only missing files or files older than 7 days:
+
+```bash
+npm run backup:global:stale
+```
+
+Force a full refresh of all existing country/level files:
+
+```bash
+npm run backup:global:refresh
+```
+
 Compress existing legacy plain JSON backups:
 
 ```bash
@@ -183,12 +195,33 @@ Backup + commit + push:
 npm run backup:global:push
 ```
 
+Refresh only missing/stale files + commit + push:
+
+```bash
+npm run backup:global:stale:push
+```
+
+Forced full refresh + commit + push:
+
+```bash
+npm run backup:global:refresh:push
+```
+
+This script skips if `data/countries.json` already has `meta.refreshed_at` for the current UTC date.
+Override that guard with:
+
+```bash
+FORCE_REFRESH_TODAY=1 npm run backup:global:refresh:push
+```
+
 ### Backup arguments
 
 - `--countries`: comma-separated ISO country codes (default `EE`)
 - `--all-countries`: `1|true|yes` to auto-discover all country ISO codes from Overpass
 - `--levels`: comma-separated admin levels (default `2,6,7,8,9,10`)
 - `--all-levels`: `1|true|yes` to auto-discover all admin levels for each country
+- `--force`: `1|true|yes` to refresh existing files instead of skipping them in full-global mode
+- `--stale-days`: refresh only missing files or files older than this many days
 - `--out-dir`: output directory (default `./data`)
 - `--delay-ms`: delay between requests in milliseconds (default `300`)
 - `--save-raw`: `1|true|yes` to keep `*.raw.json` files (default `0`)

@@ -33,6 +33,28 @@ export const compressedBackupExists = (filePath: string): boolean => {
   return fs.existsSync(compressedBackupFilePath(filePath)) || listCompressedBackupPartPaths(filePath).length > 0;
 };
 
+export const latestBackupArtifactMtimeMs = (filePath: string): number | null => {
+  const candidatePaths = [
+    filePath,
+    compressedBackupFilePath(filePath),
+    ...listCompressedBackupPartPaths(filePath),
+  ].filter((candidatePath, index, allPaths) =>
+    allPaths.indexOf(candidatePath) === index && fs.existsSync(candidatePath),
+  );
+
+  if (candidatePaths.length === 0) return null;
+
+  return Math.max(...candidatePaths.map((candidatePath) => fs.statSync(candidatePath).mtimeMs));
+};
+
+export const isFileOlderThanDays = (filePath: string, days: number): boolean => {
+  if (!fs.existsSync(filePath)) return true;
+  if (days <= 0) return false;
+
+  const maxAgeMs = days * 24 * 60 * 60 * 1000;
+  return (Date.now() - fs.statSync(filePath).mtimeMs) > maxAgeMs;
+};
+
 export const cleanupCompressedBackupArtifacts = (filePath: string): void => {
   const gzFilePath = compressedBackupFilePath(filePath);
   if (fs.existsSync(gzFilePath)) fs.unlinkSync(gzFilePath);

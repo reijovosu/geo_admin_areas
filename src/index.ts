@@ -24,11 +24,14 @@ const main = async (): Promise<void> => {
     const delayMs = parseNumber(args, "delay-ms", 300);
     const allCountriesRaw = parseString(args, "all-countries", "0").toLowerCase();
     const allLevelsRaw = parseString(args, "all-levels", "0").toLowerCase();
+    const forceRaw = parseString(args, "force", "0").toLowerCase();
+    const staleDays = parseNumber(args, "stale-days", 0);
     const saveRawRaw = parseString(args, "save-raw", "0").toLowerCase();
     const allCountries =
       allCountriesRaw === "1" || allCountriesRaw === "true" || allCountriesRaw === "yes";
     const allLevels =
       allLevelsRaw === "1" || allLevelsRaw === "true" || allLevelsRaw === "yes";
+    const force = forceRaw === "1" || forceRaw === "true" || forceRaw === "yes";
     const saveRaw = saveRawRaw === "1" || saveRawRaw === "true" || saveRawRaw === "yes";
 
     await runBackup({
@@ -36,6 +39,8 @@ const main = async (): Promise<void> => {
       allCountries,
       levels,
       allLevels,
+      force,
+      staleDays,
       saveRaw,
       outDir,
       delayMs,
@@ -59,6 +64,8 @@ const main = async (): Promise<void> => {
   console.log(`Usage:
   npm run backup -- --countries=EE,LV,LT --levels=2,4,6,8,10 --out-dir=./data --delay-ms=300 --save-raw=0
   npm run backup -- --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400 --save-raw=0
+  npm run backup -- --all-countries=1 --all-levels=1 --stale-days=7 --out-dir=./data --delay-ms=400 --save-raw=0
+  npm run backup -- --all-countries=1 --all-levels=1 --force=1 --out-dir=./data --delay-ms=400 --save-raw=0
   npm run serve -- --data-dir=./data --host=127.0.0.1 --port=8787
 `);
 };

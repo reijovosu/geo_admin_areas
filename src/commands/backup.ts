@@ -5,6 +5,8 @@ import {
   ensureDir,
   backupFilePath,
   compressedBackupExists,
+  isFileOlderThanDays,
+  latestBackupArtifactMtimeMs,
   readCompressedBackupBuffer,
   writeCompressedBackupArtifacts,
 } from "../lib/fs.js";
@@ -22,7 +24,11 @@ import {
 } from "../lib/overpass.js";
 import { isoUtcNow } from "../lib/time.js";
 import { overpassToRows } from "../lib/transform.js";
-import type { BackupOptions, BackupPayload, CountriesPayload } from "../lib/types.js";
+import type {
+  BackupOptions,
+  BackupPayload,
+  CountriesPayload,
+} from "../lib/types.js";
 
 interface CountryLevelsCatalogPayload {
   meta: {
@@ -73,12 +79,15 @@ const resolveCreatedAt = (filePath: string, fallback: string): string => {
     const raw = fs.existsSync(filePath)
       ? fs.readFileSync(filePath, "utf-8")
       : (() => {
-        const gzBuffer = readCompressedBackupBuffer(filePath);
-        return gzBuffer ? gunzipSync(gzBuffer).toString("utf-8") : null;
-      })();
+          const gzBuffer = readCompressedBackupBuffer(filePath);
+          return gzBuffer ? gunzipSync(gzBuffer).toString("utf-8") : null;
+        })();
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as { meta?: { created_at?: unknown } };
-    if (typeof parsed?.meta?.created_at === "string" && parsed.meta.created_at.trim()) {
+    if (
+      typeof parsed?.meta?.created_at === "string" &&
+      parsed.meta.created_at.trim()
+    ) {
       return parsed.meta.created_at;
     }
   } catch {
@@ -88,7 +97,11 @@ const resolveCreatedAt = (filePath: string, fallback: string): string => {
   return fallback;
 };
 
-const rawResponseFilePath = (outDirAbs: string, countryCode: string, level: number): string => {
+const rawResponseFilePath = (
+  outDirAbs: string,
+  countryCode: string,
+  level: number,
+): string => {
   return path.join(outDirAbs, `${countryCode}_L${level}.raw.json`);
 };
 
@@ -98,12 +111,17 @@ const writeCompressedBackupJson = (filePath: string, content: string): void => {
   fs.unlinkSync(filePath);
 };
 
-const serializeCompressedJson = (payload: unknown): string => `${JSON.stringify(payload)}\n`;
+const serializeCompressedJson = (payload: unknown): string =>
+  `${JSON.stringify(payload)}\n`;
 
 const chunkPartGlobPrefix = (countryCode: string, level: number): string =>
   `${countryCode}_L${level}.raw.part`;
 
-const cleanupRawArtifacts = (outDirAbs: string, countryCode: string, level: number): void => {
+const cleanupRawArtifacts = (
+  outDirAbs: string,
+  countryCode: string,
+  level: number,
+): void => {
   const rawFile = rawResponseFilePath(outDirAbs, countryCode, level);
   if (fs.existsSync(rawFile)) fs.unlinkSync(rawFile);
 
@@ -123,14 +141,20 @@ const parseCountryCodesFromCountriesBackup = (filePath: string): string[] => {
     const parsed = JSON.parse(raw) as CountriesPayload;
     const countries = Array.isArray(parsed?.countries) ? parsed.countries : [];
     return countries
-      .map((item) => String(item?.country_code ?? "").toUpperCase().trim())
+      .map((item) =>
+        String(item?.country_code ?? "")
+          .toUpperCase()
+          .trim(),
+      )
       .filter((code) => /^[A-Z]{2}$/.test(code));
   } catch {
     return [];
   }
 };
 
-const loadCountryLevelsCatalog = (filePath: string): Record<string, number[]> => {
+const loadCountryLevelsCatalog = (
+  filePath: string,
+): Record<string, number[]> => {
   if (!fs.existsSync(filePath)) return {};
 
   try {
@@ -189,21 +213,46 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
   const outDirAbs = path.resolve(process.cwd(), options.outDir);
   ensureDir(outDirAbs);
   const runTimestamp = isoUtcNow();
-  const missingOnlyMode = options.allCountries && options.allLevels;
+  const missingOnlyMode =
+    options.allCountries && options.allLevels && !options.force;
+  const staleDays = Math.max(0, options.staleDays);
   const countriesFilePath = path.join(outDirAbs, "countries.json");
   const levelsCatalogPath = path.join(outDirAbs, "country-levels.json");
-  const levelsByCountry = missingOnlyMode ? loadCountryLevelsCatalog(levelsCatalogPath) : {};
+  const canReuseLevelsCatalog =
+    missingOnlyMode &&
+    (staleDays <= 0 || !isFileOlderThanDays(levelsCatalogPath, staleDays));
+  const levelsByCountry = canReuseLevelsCatalog
+    ? loadCountryLevelsCatalog(levelsCatalogPath)
+    : {};
   let levelsCatalogChanged = false;
 
-  const shouldUseLocalCountriesOnly = missingOnlyMode && fs.existsSync(countriesFilePath);
-  let allCountriesResult: Awaited<ReturnType<typeof fetchOverpass>> | null = null;
+  const shouldUseLocalCountriesOnly =
+    options.allCountries &&
+    !options.force &&
+    fs.existsSync(countriesFilePath) &&
+    (staleDays <= 0 || !isFileOlderThanDays(countriesFilePath, staleDays));
+  const shouldRefreshBackupFile = (filePath: string): boolean => {
+    const hasBackupArtifact =
+      fs.existsSync(filePath) || compressedBackupExists(filePath);
+    if (!hasBackupArtifact) return true;
+    if (options.force) return true;
+    if (staleDays <= 0) return false;
+
+    const latestMtimeMs = latestBackupArtifactMtimeMs(filePath);
+    if (latestMtimeMs == null) return true;
+
+    const maxAgeMs = staleDays * 24 * 60 * 60 * 1000;
+    return Date.now() - latestMtimeMs > maxAgeMs;
+  };
+  let allCountriesResult: Awaited<ReturnType<typeof fetchOverpass>> | null =
+    null;
 
   if (options.allCountries && !shouldUseLocalCountriesOnly) {
     allCountriesResult = await fetchOverpass(buildAllCountriesQuery());
   }
 
   if (allCountriesResult) {
-    if (missingOnlyMode && fs.existsSync(countriesFilePath)) {
+    if (shouldUseLocalCountriesOnly) {
       console.log(`Skipping existing file ${countriesFilePath}`);
     } else {
       const createdAt = resolveCreatedAt(countriesFilePath, runTimestamp);
@@ -231,7 +280,9 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
         `${JSON.stringify(countriesPayload, null, 2)}\n`,
         "utf-8",
       );
-      console.log(`Saved ${countriesFilePath} countries=${countriesPayload.countries.length}`);
+      console.log(
+        `Saved ${countriesFilePath} countries=${countriesPayload.countries.length}`,
+      );
     }
   }
 
@@ -251,12 +302,14 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
   }
 
   console.log(`Countries to backup: ${countryCodes.length}`);
-
   for (const countryCode of countryCodes) {
     let levelsForCountry = options.levels;
 
     if (options.allLevels) {
-      if (missingOnlyMode && Array.isArray(levelsByCountry[countryCode])) {
+      if (
+        canReuseLevelsCatalog &&
+        Array.isArray(levelsByCountry[countryCode])
+      ) {
         levelsForCountry = levelsByCountry[countryCode];
       } else {
         levelsForCountry = extractAdminLevels(
@@ -279,7 +332,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
     for (const level of levelsForCountry) {
       const filePath = backupFilePath(outDirAbs, countryCode, level);
-      if (missingOnlyMode && (fs.existsSync(filePath) || compressedBackupExists(filePath))) {
+      if (!shouldRefreshBackupFile(filePath)) {
         if (fs.existsSync(filePath) && !compressedBackupExists(filePath)) {
           const content = fs.readFileSync(filePath, "utf-8");
           writeCompressedBackupJson(filePath, content);
@@ -313,7 +366,9 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           `Large payload for country=${countryCode} level=${level}; switching to chunked mode by parent level=${parentLevel}`,
         );
 
-        const parents = await fetchOverpass(buildParentRelationsQuery(countryCode, parentLevel));
+        const parents = await fetchOverpass(
+          buildParentRelationsQuery(countryCode, parentLevel),
+        );
         const parentRelationIds = extractRelationIds(parents.data);
         if (parentRelationIds.length === 0) {
           throw new Error(
@@ -347,10 +402,17 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
           const partFile = `${countryCode}_L${level}.raw.part${chunkIndex}.json`;
           if (options.saveRaw) {
-            fs.writeFileSync(path.join(outDirAbs, partFile), chunk.rawText, "utf-8");
+            fs.writeFileSync(
+              path.join(outDirAbs, partFile),
+              chunk.rawText,
+              "utf-8",
+            );
             chunkFiles.push(partFile);
           }
-          const chunkDurationSec = ((Date.now() - chunkStartedAt) / 1000).toFixed(1);
+          const chunkDurationSec = (
+            (Date.now() - chunkStartedAt) /
+            1000
+          ).toFixed(1);
           console.log(
             `Chunk ${chunkIndex}/${parentRelationIds.length} DONE duration=${chunkDurationSec}s rows_fetched=${partRows.length} rows_added=${addedCount} rows_total=${afterCount}`,
           );
@@ -391,7 +453,11 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
         writeCompressedBackupJson(filePath, serializeCompressedJson(payload));
         if (options.saveRaw) {
-          fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+          fs.writeFileSync(
+            rawResponseFilePath(outDirAbs, countryCode, level),
+            rawText,
+            "utf-8",
+          );
         } else {
           cleanupRawArtifacts(outDirAbs, countryCode, level);
         }
@@ -421,7 +487,11 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
       writeCompressedBackupJson(filePath, serializeCompressedJson(payload));
       if (options.saveRaw) {
-        fs.writeFileSync(rawResponseFilePath(outDirAbs, countryCode, level), rawText, "utf-8");
+        fs.writeFileSync(
+          rawResponseFilePath(outDirAbs, countryCode, level),
+          rawText,
+          "utf-8",
+        );
       } else {
         cleanupRawArtifacts(outDirAbs, countryCode, level);
       }
@@ -435,6 +505,8 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
   if (missingOnlyMode && levelsCatalogChanged) {
     saveCountryLevelsCatalog(levelsCatalogPath, levelsByCountry, runTimestamp);
-    console.log(`Saved ${levelsCatalogPath} countries=${Object.keys(levelsByCountry).length}`);
+    console.log(
+      `Saved ${levelsCatalogPath} countries=${Object.keys(levelsByCountry).length}`,
+    );
   }
 };
