@@ -30,6 +30,11 @@ const sendJson = (res: http.ServerResponse, statusCode: number, payload: unknown
   res.end(`${JSON.stringify(payload, null, 2)}\n`);
 };
 
+const loadBackupPayload = (filePath: string): BackupPayload | null => {
+  if (!ensureJsonFromGzip(filePath)) return null;
+  return readJsonFile<BackupPayload>(filePath);
+};
+
 const createOpenApiDocument = (baseUrl: string) => ({
   openapi: "3.0.3",
   info: {
@@ -160,6 +165,69 @@ const createOpenApiDocument = (baseUrl: string) => ({
         },
       },
     },
+    "/relation/{osmId}": {
+      get: {
+        tags: ["Admin Areas"],
+        summary: "Lookup relation rows by OSM relation id across backups",
+        parameters: [
+          {
+            name: "osmId",
+            in: "path",
+            required: true,
+            description: "OSM relation id",
+            schema: {
+              type: "integer",
+              example: 79510,
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Matching relation rows",
+          },
+          "404": {
+            description: "No matching rows found",
+          },
+        },
+      },
+    },
+    "/osm/{osmType}/{osmId}": {
+      get: {
+        tags: ["Admin Areas"],
+        summary: "Lookup rows by OSM type and id across backups",
+        parameters: [
+          {
+            name: "osmType",
+            in: "path",
+            required: true,
+            description: "OSM element type",
+            schema: {
+              type: "string",
+              enum: ["relation", "way"],
+              example: "relation",
+            },
+          },
+          {
+            name: "osmId",
+            in: "path",
+            required: true,
+            description: "OSM element id",
+            schema: {
+              type: "integer",
+              example: 79510,
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Matching rows",
+          },
+          "404": {
+            description: "No matching rows found",
+          },
+        },
+      },
+    },
   },
 });
 
@@ -232,6 +300,44 @@ const listCountryLevels = (dataDir: string, countryCode: string): number[] => {
     .filter((match): match is RegExpMatchArray => match !== null && match[1].toUpperCase() === country)
     .map((match) => Number(match[2]))
     .sort((a, b) => a - b);
+};
+
+const findRowsByOsmRef = (
+  dataDir: string,
+  osmType: "relation" | "way",
+  osmId: number,
+): Array<{
+  file: string;
+  country_code: string;
+  level: number;
+  row: BackupPayload["rows"][number];
+}> => {
+  const matches: Array<{
+    file: string;
+    country_code: string;
+    level: number;
+    row: BackupPayload["rows"][number];
+  }> = [];
+
+  for (const file of listBackupFiles(dataDir)) {
+    const fileMatch = file.match(/^([A-Z]{2})_L(\d+)\.json$/i);
+    if (!fileMatch) continue;
+
+    const payload = loadBackupPayload(path.join(dataDir, file));
+    if (!payload?.rows) continue;
+
+    for (const row of payload.rows) {
+      if (row.osm_type !== osmType || row.osm_id !== osmId) continue;
+      matches.push({
+        file,
+        country_code: fileMatch[1].toUpperCase(),
+        level: Number(fileMatch[2]),
+        row,
+      });
+    }
+  }
+
+  return matches;
 };
 
 const ensureJsonFromGzip = (jsonFilePath: string): boolean => {
@@ -384,12 +490,50 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       const level = Number(routeMatch[2]);
       const filePath = backupFilePath(dataDir, country, level);
 
-      if (!ensureJsonFromGzip(filePath)) {
+      const payload = loadBackupPayload(filePath);
+      if (!payload) {
         sendJson(res, 404, { error: `Backup not found for ${country} L${level}` });
         return;
       }
 
-      sendJson(res, 200, readJsonFile<BackupPayload>(filePath));
+      sendJson(res, 200, payload);
+      return;
+    }
+
+    const relationRouteMatch = url.pathname.match(/^\/relation\/(\d+)$/);
+    if (relationRouteMatch) {
+      const osmId = Number(relationRouteMatch[1]);
+      const matches = findRowsByOsmRef(dataDir, "relation", osmId);
+      if (matches.length === 0) {
+        sendJson(res, 404, { error: `No relation rows found for ${osmId}` });
+        return;
+      }
+
+      sendJson(res, 200, {
+        osm_type: "relation",
+        osm_id: osmId,
+        count: matches.length,
+        matches,
+      });
+      return;
+    }
+
+    const osmRouteMatch = url.pathname.match(/^\/osm\/(relation|way)\/(\d+)$/);
+    if (osmRouteMatch) {
+      const osmType = osmRouteMatch[1] as "relation" | "way";
+      const osmId = Number(osmRouteMatch[2]);
+      const matches = findRowsByOsmRef(dataDir, osmType, osmId);
+      if (matches.length === 0) {
+        sendJson(res, 404, { error: `No ${osmType} rows found for ${osmId}` });
+        return;
+      }
+
+      sendJson(res, 200, {
+        osm_type: osmType,
+        osm_id: osmId,
+        count: matches.length,
+        matches,
+      });
       return;
     }
 
@@ -404,6 +548,8 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
         "/admin-areas?country=EE",
         "/admin-areas?country=EE&level=2",
         "/admin-areas/EE/2",
+        "/relation/79510",
+        "/osm/relation/79510",
       ],
     });
   });

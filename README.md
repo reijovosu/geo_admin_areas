@@ -35,6 +35,11 @@ Each backup file keeps all source API fields:
 - matched raw element reference per row in `raw_api_ref` (for example `relation/79510`)
 - transformed row fields (`name`, `tags`, `geom_geojson`, `center_geojson`, etc.)
 
+Import guard:
+
+- for admin levels above 2, a row is kept only when its center point falls inside the target country's level-2 geometry
+- this blocks cross-border relations from being duplicated into neighboring country snapshots
+
 Admin area backups are stored compressed as `CC_L{level}.json.gz`.
 
 For very large levels (for example large countries at deep admin levels), backup automatically falls back to chunked parent-area downloads.
@@ -249,6 +254,8 @@ API routes:
 - `GET /admin-areas?country=EE`
 - `GET /admin-areas?country=EE&level=2`
 - `GET /admin-areas/EE/2`
+- `GET /relation/79510`
+- `GET /osm/relation/79510`
 
 ## Timestamp behavior
 

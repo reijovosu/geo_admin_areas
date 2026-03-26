@@ -10,6 +10,7 @@ import {
   readCompressedBackupBuffer,
   writeCompressedBackupArtifacts,
 } from "../lib/fs.js";
+import { parseMultiPolygonGeometry, type MultiPolygonGeometry } from "../lib/geo.js";
 import {
   buildAllCountriesQuery,
   buildCountryLevelsQuery,
@@ -202,6 +203,27 @@ const saveCountryLevelsCatalog = (
   fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 };
 
+const extractCountryBoundaryGeometry = (filePath: string): MultiPolygonGeometry | null => {
+  try {
+    const raw = fs.existsSync(filePath)
+      ? fs.readFileSync(filePath, "utf-8")
+      : (() => {
+          const gzBuffer = readCompressedBackupBuffer(filePath);
+          return gzBuffer ? gunzipSync(gzBuffer).toString("utf-8") : null;
+        })();
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as BackupPayload;
+    const row = Array.isArray(parsed.rows)
+      ? parsed.rows.find((candidate) => candidate.admin_level === 2)
+      : null;
+
+    return row?.geom_geojson ? parseMultiPolygonGeometry(row.geom_geojson) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const runBackup = async (options: BackupOptions): Promise<void> => {
   if (!options.allCountries && options.countries.length === 0) {
     throw new Error("No countries provided. Use --countries=EE,LV,LT");
@@ -246,6 +268,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
   };
   let allCountriesResult: Awaited<ReturnType<typeof fetchOverpass>> | null =
     null;
+  const countryBoundaryByCode = new Map<string, MultiPolygonGeometry | null>();
 
   if (options.allCountries && !shouldUseLocalCountriesOnly) {
     allCountriesResult = await fetchOverpass(buildAllCountriesQuery());
@@ -303,6 +326,33 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
 
   console.log(`Countries to backup: ${countryCodes.length}`);
   for (const countryCode of countryCodes) {
+    const getCountryBoundary = async (): Promise<MultiPolygonGeometry | null> => {
+      if (countryBoundaryByCode.has(countryCode)) {
+        return countryBoundaryByCode.get(countryCode) ?? null;
+      }
+
+      const level2FilePath = backupFilePath(outDirAbs, countryCode, 2);
+      const boundaryFromBackup = extractCountryBoundaryGeometry(level2FilePath);
+      if (boundaryFromBackup) {
+        countryBoundaryByCode.set(countryCode, boundaryFromBackup);
+        return boundaryFromBackup;
+      }
+
+      try {
+        const level2Result = await fetchOverpass(buildOverpassQuery(countryCode, 2));
+        const level2Rows = overpassToRows(countryCode, 2, level2Result.data);
+        const boundary =
+          level2Rows.length > 0
+            ? parseMultiPolygonGeometry(level2Rows[0].geom_geojson)
+            : null;
+        countryBoundaryByCode.set(countryCode, boundary);
+        return boundary;
+      } catch {
+        countryBoundaryByCode.set(countryCode, null);
+        return null;
+      }
+    };
+
     let levelsForCountry = options.levels;
 
     if (options.allLevels) {
@@ -345,6 +395,7 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
       console.log(`Fetching country=${countryCode} level=${level} ...`);
 
       const query = buildOverpassQuery(countryCode, level);
+      const countryBoundary = level === 2 ? null : await getCountryBoundary();
       let endpoint: string;
       let data: Record<string, unknown>;
       let rawText: string;
@@ -392,7 +443,9 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
           );
           if (i === 0) firstEndpoint = chunk.endpoint;
 
-          const partRows = overpassToRows(countryCode, level, chunk.data);
+          const partRows = overpassToRows(countryCode, level, chunk.data, {
+            countryBoundary,
+          });
           const beforeCount = rowsByKey.size;
           for (const row of partRows) {
             rowsByKey.set(`${row.osm_type}/${row.osm_id}`, row);
@@ -466,7 +519,15 @@ export const runBackup = async (options: BackupOptions): Promise<void> => {
         if (options.delayMs > 0) await sleep(options.delayMs);
         continue;
       }
-      const rows = overpassToRows(countryCode, level, data);
+      const rows = overpassToRows(countryCode, level, data, {
+        countryBoundary,
+      });
+      if (level === 2 && rows.length > 0) {
+        countryBoundaryByCode.set(
+          countryCode,
+          parseMultiPolygonGeometry(rows[0].geom_geojson),
+        );
+      }
       const createdAt = resolveCreatedAt(filePath, runTimestamp);
       const refreshedAt = isoUtcNow();
       const rawFileName = `${countryCode}_L${level}.raw.json`;

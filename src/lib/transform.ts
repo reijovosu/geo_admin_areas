@@ -1,4 +1,5 @@
 import osmtogeojson from "osmtogeojson";
+import { pointInMultiPolygon, type MultiPolygonGeometry } from "./geo.js";
 import type { BackupRow } from "./types.js";
 
 interface OverpassElement {
@@ -114,6 +115,9 @@ export const overpassToRows = (
   countryCode: string,
   level: number,
   overpassPayload: Record<string, unknown>,
+  options?: {
+    countryBoundary?: MultiPolygonGeometry | null;
+  },
 ): BackupRow[] => {
   const fc = osmtogeojson(overpassPayload) as GeoJSONFeatureCollection;
   const features = Array.isArray(fc.features) ? fc.features : [];
@@ -147,6 +151,12 @@ export const overpassToRows = (
     const osmType = parseOsmType(properties);
     const center = pickCenter(properties, geom);
     if (!center) continue;
+    if (
+      options?.countryBoundary &&
+      !pointInMultiPolygon(center.coordinates, options.countryBoundary)
+    ) {
+      continue;
+    }
 
     const adminLevelCandidate = Number(properties.admin_level);
     const adminLevel = Number.isFinite(adminLevelCandidate) ? adminLevelCandidate : level;
