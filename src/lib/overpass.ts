@@ -4,10 +4,29 @@ const OVERPASS_ENDPOINTS = [
   "https://overpass.openstreetmap.ru/api/interpreter",
 ] as const;
 
-const FETCH_TIMEOUT_MS = 120_000;
+const envNumberOrFallback = (name: string, fallback: number): number => {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const FETCH_TIMEOUT_MS = envNumberOrFallback("OVERPASS_TIMEOUT_MS", 120_000);
+const FETCH_RETRY_ATTEMPTS = Math.max(1, envNumberOrFallback("OVERPASS_RETRY_ATTEMPTS", 5));
+const FETCH_RETRY_BASE_DELAY_MS = envNumberOrFallback("OVERPASS_RETRY_BASE_DELAY_MS", 2_000);
+const FETCH_RETRY_MAX_DELAY_MS = Math.max(
+  FETCH_RETRY_BASE_DELAY_MS,
+  envNumberOrFallback("OVERPASS_RETRY_MAX_DELAY_MS", 30_000),
+);
 
 const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const computeRetryDelayMs = (attempt: number): number => {
+  const exponentialDelay = FETCH_RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(0, attempt - 1));
+  return Math.min(FETCH_RETRY_MAX_DELAY_MS, exponentialDelay);
 };
 
 const formatError = (error: unknown): string => {
@@ -126,7 +145,7 @@ export const fetchOverpass = async (
   let lastAttempt = 0;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= FETCH_RETRY_ATTEMPTS; attempt++) {
       try {
         lastEndpoint = endpoint;
         lastAttempt = attempt;
@@ -148,7 +167,13 @@ export const fetchOverpass = async (
 
         if ([429, 502, 503, 504].includes(response.status)) {
           lastError = new Error(`Overpass ${response.status} ${endpoint}`);
-          await sleep(800 * Math.pow(2, attempt - 1));
+          if (attempt < FETCH_RETRY_ATTEMPTS) {
+            const delayMs = computeRetryDelayMs(attempt);
+            console.warn(
+              `Overpass retry scheduled endpoint=${endpoint} attempt=${attempt}/${FETCH_RETRY_ATTEMPTS} delay_ms=${delayMs} reason=status_${response.status}`,
+            );
+            await sleep(delayMs);
+          }
           continue;
         }
 
@@ -171,16 +196,22 @@ export const fetchOverpass = async (
         lastError = error;
         const msg = formatError(error);
         console.warn(
-          `Overpass request failed endpoint=${endpoint} attempt=${attempt}/3 timeout_ms=${FETCH_TIMEOUT_MS} error=${msg}`,
+          `Overpass request failed endpoint=${endpoint} attempt=${attempt}/${FETCH_RETRY_ATTEMPTS} timeout_ms=${FETCH_TIMEOUT_MS} error=${msg}`,
         );
-        await sleep(800 * Math.pow(2, attempt - 1));
+        if (attempt < FETCH_RETRY_ATTEMPTS) {
+          const delayMs = computeRetryDelayMs(attempt);
+          console.warn(
+            `Overpass retry scheduled endpoint=${endpoint} attempt=${attempt}/${FETCH_RETRY_ATTEMPTS} delay_ms=${delayMs}`,
+          );
+          await sleep(delayMs);
+        }
       }
     }
   }
 
   const lastMessage = formatError(lastError);
   throw new Error(
-    `Overpass request failed after all endpoints. Last endpoint=${lastEndpoint} attempt=${lastAttempt}/3 error=${lastMessage}`,
+    `Overpass request failed after all endpoints. Last endpoint=${lastEndpoint} attempt=${lastAttempt}/${FETCH_RETRY_ATTEMPTS} error=${lastMessage}`,
   );
 };
 
