@@ -5,3 +5,4 @@ dist/
 data/[A-Za-z][A-Za-z]_L*.json
 .DS_Store
 Thumbs.db
+pull.sh
