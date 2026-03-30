@@ -28,6 +28,12 @@ interface ParentCandidate {
   area: number | null;
 }
 
+interface ResolvedParentRef {
+  osm_type: "relation" | "way";
+  osm_id: number;
+  admin_level: number | null;
+}
+
 interface ChildCandidate {
   country_code: string;
   osm_type: "relation" | "way";
@@ -69,6 +75,7 @@ export interface ParentLevelStats {
   total_children: number;
   matched: number;
   unmatched: number;
+  live_fallback_failed: number;
   matches_by_parent_level: Record<string, number>;
 }
 
@@ -177,6 +184,8 @@ const initializeDatabase = (dbPath: string): DatabaseSync => {
       parent_osm_type TEXT,
       parent_osm_id INTEGER,
       parent_admin_level INTEGER,
+      live_fallback_failed INTEGER NOT NULL DEFAULT 0,
+      live_fallback_error TEXT,
       source_level INTEGER NOT NULL,
       PRIMARY KEY (child_osm_type, child_osm_id)
     );
@@ -203,6 +212,14 @@ const initializeDatabase = (dbPath: string): DatabaseSync => {
   const hasChildCenter = columns.some((column) => String(column.name ?? "") === "child_center_geojson");
   if (!hasChildCenter) {
     db.exec("ALTER TABLE parent_osm_ids ADD COLUMN child_center_geojson TEXT");
+  }
+  const hasLiveFallbackFailed = columns.some((column) => String(column.name ?? "") === "live_fallback_failed");
+  if (!hasLiveFallbackFailed) {
+    db.exec("ALTER TABLE parent_osm_ids ADD COLUMN live_fallback_failed INTEGER NOT NULL DEFAULT 0");
+  }
+  const hasLiveFallbackError = columns.some((column) => String(column.name ?? "") === "live_fallback_error");
+  if (!hasLiveFallbackError) {
+    db.exec("ALTER TABLE parent_osm_ids ADD COLUMN live_fallback_error TEXT");
   }
 
   return db;
@@ -345,7 +362,7 @@ const resolveParentForChild = (
   childLevel: number,
   parentsByLevel: Map<number, ParentCandidate[]>,
 ): {
-  parent: ParentCandidate | null;
+  parent: ResolvedParentRef | null;
   sourceLevel: number;
 } => {
   if (child.center == null) {
@@ -387,7 +404,7 @@ const resolveParentFromLiveOsm = async (
   childLevel: number,
   options: ParentCalculationOptions,
 ): Promise<{
-  parent: { osm_type: "relation"; osm_id: number; admin_level: number | null } | null;
+  parent: ResolvedParentRef | null;
   sourceLevel: number;
 }> => {
   if (!options.liveFallback || child.center == null) {
@@ -442,6 +459,8 @@ const upsertParentRow = (db: DatabaseSync, row: {
   parent_osm_type: "relation" | "way" | null;
   parent_osm_id: number | null;
   parent_admin_level: number | null;
+  live_fallback_failed: number;
+  live_fallback_error: string | null;
   source_level: number;
 }): void => {
   db.prepare(`
@@ -454,8 +473,10 @@ const upsertParentRow = (db: DatabaseSync, row: {
       parent_osm_type,
       parent_osm_id,
       parent_admin_level,
+      live_fallback_failed,
+      live_fallback_error,
       source_level
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(child_osm_type, child_osm_id) DO UPDATE SET
       country_code = excluded.country_code,
       child_admin_level = excluded.child_admin_level,
@@ -463,6 +484,8 @@ const upsertParentRow = (db: DatabaseSync, row: {
       parent_osm_type = excluded.parent_osm_type,
       parent_osm_id = excluded.parent_osm_id,
       parent_admin_level = excluded.parent_admin_level,
+      live_fallback_failed = excluded.live_fallback_failed,
+      live_fallback_error = excluded.live_fallback_error,
       source_level = excluded.source_level
   `).run(
     row.country_code,
@@ -473,6 +496,8 @@ const upsertParentRow = (db: DatabaseSync, row: {
     row.parent_osm_type,
     row.parent_osm_id,
     row.parent_admin_level,
+    row.live_fallback_failed,
+    row.live_fallback_error,
     row.source_level,
   );
 };
@@ -572,6 +597,7 @@ const processCountry = async (
         total_children: payload.rows.length,
         matched: 0,
         unmatched: 0,
+        live_fallback_failed: 0,
         matches_by_parent_level: {},
       };
 
@@ -587,9 +613,26 @@ const processCountry = async (
 
         const fallbackSourceLevel = file.level;
         const localResolution = resolveParentForChild(child, file.level, context.parentsByLevel);
-        const finalResolution = localResolution.parent
-          ? localResolution
-          : await resolveParentFromLiveOsm(child, file.level, options);
+        let finalResolution = localResolution;
+        let liveFallbackFailed = 0;
+        let liveFallbackError: string | null = null;
+
+        if (!localResolution.parent) {
+          try {
+            finalResolution = await resolveParentFromLiveOsm(child, file.level, options);
+          } catch (error) {
+            liveFallbackFailed = 1;
+            liveFallbackError = error instanceof Error ? error.message : String(error);
+            finalResolution = {
+              parent: null,
+              sourceLevel: fallbackSourceLevel,
+            };
+            levelStats.live_fallback_failed += 1;
+            options.logger?.(
+              `Live fallback failed for ${context.countryCode} ${row.osm_type}/${row.osm_id}: ${liveFallbackError}`,
+            );
+          }
+        }
         const sourceLevel = finalResolution.parent
           ? finalResolution.sourceLevel
           : fallbackSourceLevel;
@@ -603,6 +646,8 @@ const processCountry = async (
           parent_osm_type: finalResolution.parent?.osm_type ?? null,
           parent_osm_id: finalResolution.parent?.osm_id ?? null,
           parent_admin_level: finalResolution.parent?.admin_level ?? null,
+          live_fallback_failed: liveFallbackFailed,
+          live_fallback_error: liveFallbackError,
           source_level: sourceLevel,
         });
 

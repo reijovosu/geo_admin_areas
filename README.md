@@ -257,6 +257,7 @@ Unresolved rows:
 - are still written to `parent_osm_ids`
 - keep `parent_osm_type`, `parent_osm_id`, and `parent_admin_level` as `NULL`
 - keep `child_center_geojson` so unresolved and live-fallback cases can be inspected later
+- if live Overpass fallback fails for a specific row, that row is still stored and marked with `live_fallback_failed = 1` plus `live_fallback_error`
 
 Version tracking:
 

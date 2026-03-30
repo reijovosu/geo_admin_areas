@@ -13,7 +13,7 @@ const envNumberOrFallback = (name: string, fallback: number): number => {
 };
 
 const FETCH_TIMEOUT_MS = envNumberOrFallback("OVERPASS_TIMEOUT_MS", 120_000);
-const FETCH_RETRY_ATTEMPTS = Math.max(1, envNumberOrFallback("OVERPASS_RETRY_ATTEMPTS", 5));
+const FETCH_RETRY_ATTEMPTS = Math.max(1, envNumberOrFallback("OVERPASS_RETRY_ATTEMPTS", 10));
 const FETCH_RETRY_BASE_DELAY_MS = envNumberOrFallback("OVERPASS_RETRY_BASE_DELAY_MS", 2_000);
 const FETCH_RETRY_MAX_DELAY_MS = Math.max(
   FETCH_RETRY_BASE_DELAY_MS,

@@ -42,6 +42,7 @@ export const runParents = async (options: ParentsCommandOptions): Promise<void> 
         `total=${stat.total_children}`,
         `matched=${stat.matched}`,
         `unmatched=${stat.unmatched}`,
+        `live_fallback_failed=${stat.live_fallback_failed}`,
         `matches_by_parent_level=${formatMatchesByLevel(stat.matches_by_parent_level)}`,
       ].join(" "),
     );
