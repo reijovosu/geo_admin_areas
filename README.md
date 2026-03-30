@@ -100,6 +100,18 @@ Container environment variables:
 - `HOST` default: `0.0.0.0`
 - `PORT` default: `8787`
 - `DATA_DIR` default: `/app/data`
+- `NODE_OPTIONS` default: `--max-old-space-size=8192`
+
+The server bootstrap can parse very large backup files when unpacking data and building `parent_osm_ids.sqlite`, so container memory matters. If you run into heap failures during startup, raise the Node heap explicitly:
+
+```bash
+docker run -d \
+  --name geo-admin-areas \
+  --pull always \
+  -e NODE_OPTIONS=--max-old-space-size=12288 \
+  -p 8787:8787 \
+  ghcr.io/reijovosu/geo_admin_areas:latest
+```
 
 Example with a custom port:
 
@@ -211,6 +223,45 @@ Forced full refresh + commit + push:
 ```bash
 npm run backup:global:refresh:push
 ```
+
+## Parent Calculation
+
+Build a local-only SQLite cache of straight parent mappings from the JSON backup files:
+
+```bash
+npm run parents -- --data-dir=./data --db-path=./data/parent_osm_ids.sqlite
+```
+
+Optional verification run:
+
+```bash
+npm run parents -- --data-dir=./data --db-path=./data/parent_osm_ids.sqlite --countries=EE --verify=1 --verify-sample-size=25
+```
+
+How it works:
+
+- files are grouped by `country_code`
+- for each child file `CC_L{level}.json`, candidate parent levels are the lower levels that exist for that same country
+- parent lookup tries the closest lower level first, using child `center_geojson`
+- each parent level uses a bbox prefilter before exact point-in-multipolygon checks against `geom_geojson`
+- if multiple parents on the same level contain the child point, the smaller polygon area wins; ties fall back to smaller `osm_id`
+- if local country snapshots cannot resolve a child, the calculator falls back to live OSM containment lookup for that child center only
+
+`source_level` means:
+
+- the parent level pass that produced the stored match
+- if a child stays unresolved, `source_level` is the child file level that was processed
+
+Unresolved rows:
+
+- are still written to `parent_osm_ids`
+- keep `parent_osm_type`, `parent_osm_id`, and `parent_admin_level` as `NULL`
+- keep `child_center_geojson` so unresolved and live-fallback cases can be inspected later
+
+Version tracking:
+
+- `parent_osm_ids_versions.refreshed_at` is copied from each JSON file's `meta.refreshed_at`
+- repeated runs reuse existing SQLite rows when the per-country source versions have not changed
 
 This script skips if `data/countries.json` already has `meta.refreshed_at` for the current UTC date.
 Override that guard with:

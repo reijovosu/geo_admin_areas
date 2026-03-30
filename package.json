@@ -13,6 +13,7 @@
     "backup:global:push": "bash ./scripts/backup-and-push.sh",
     "backup:global:stale:push": "bash ./scripts/backup-stale-and-push.sh",
     "backup:global:refresh:push": "bash ./scripts/backup-refresh-and-push.sh",
+    "parents": "tsx src/index.ts parents",
     "serve": "tsx src/index.ts serve"
   },
   "dependencies": {

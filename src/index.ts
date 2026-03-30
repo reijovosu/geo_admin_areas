@@ -1,5 +1,7 @@
+import path from "node:path";
 import { parseCSVArg, parseIntList, parseList, parseNumber, parseString } from "./lib/cli.js";
 import { runBackup } from "./commands/backup.js";
+import { runParents } from "./commands/parents.js";
 import { runServer } from "./commands/serve.js";
 
 const envOrFallback = (name: string, fallback: string): string => {
@@ -61,11 +63,33 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  if (command === "parents") {
+    const dataDir = parseString(args, "data-dir", envOrFallback("DATA_DIR", "./data"));
+    const dbPath = parseString(args, "db-path", path.join(dataDir, "parent_osm_ids.sqlite"));
+    const countries = parseList(parseCSVArg(args, "countries"), []);
+    const levels = parseIntList(parseCSVArg(args, "levels"), []);
+    const verifyRaw = parseString(args, "verify", "0").toLowerCase();
+    const verify =
+      verifyRaw === "1" || verifyRaw === "true" || verifyRaw === "yes";
+    const verifySampleSize = parseNumber(args, "verify-sample-size", 25);
+
+    await runParents({
+      dataDir,
+      dbPath,
+      countries,
+      levels,
+      verify,
+      verifySampleSize,
+    });
+    return;
+  }
+
   console.log(`Usage:
   npm run backup -- --countries=EE,LV,LT --levels=2,4,6,8,10 --out-dir=./data --delay-ms=300 --save-raw=0
   npm run backup -- --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400 --save-raw=0
   npm run backup -- --all-countries=1 --all-levels=1 --stale-days=7 --out-dir=./data --delay-ms=400 --save-raw=0
   npm run backup -- --all-countries=1 --all-levels=1 --force=1 --out-dir=./data --delay-ms=400 --save-raw=0
+  npm run parents -- --data-dir=./data --db-path=./data/parent_osm_ids.sqlite --countries=EE --verify=1
   npm run serve -- --data-dir=./data --host=127.0.0.1 --port=8787
 `);
 };

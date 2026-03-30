@@ -133,6 +133,18 @@ export const buildOverpassQueryForParentRelation = (
   `;
 };
 
+export const buildContainingAdminAreasQuery = (
+  lat: number,
+  lon: number,
+): string => {
+  return `
+    [out:json][timeout:180];
+    is_in(${lat},${lon})->.containers;
+    relation(pivot.containers)["boundary"="administrative"]["admin_level"];
+    out tags center;
+  `;
+};
+
 export const fetchOverpass = async (
   query: string,
 ): Promise<{
@@ -339,4 +351,49 @@ export const extractRelationIds = (
   }
 
   return Array.from(ids).sort((a, b) => a - b);
+};
+
+export const extractContainingAdminAreas = (
+  payload: Record<string, unknown>,
+): Array<{
+  osm_type: "relation";
+  osm_id: number;
+  admin_level: number | null;
+  tags: Record<string, unknown>;
+}> => {
+  const elements = Array.isArray(payload.elements)
+    ? (payload.elements as Array<Record<string, unknown>>)
+    : [];
+  const out = new Map<number, {
+    osm_type: "relation";
+    osm_id: number;
+    admin_level: number | null;
+    tags: Record<string, unknown>;
+  }>();
+
+  for (const element of elements) {
+    if (String(element.type ?? "") !== "relation") continue;
+    const osmId = Number(element.id);
+    if (!Number.isInteger(osmId) || osmId <= 0) continue;
+
+    const tags =
+      element.tags && typeof element.tags === "object"
+        ? (element.tags as Record<string, unknown>)
+        : {};
+    const adminLevelRaw = Number(String(tags.admin_level ?? "").trim());
+
+    out.set(osmId, {
+      osm_type: "relation",
+      osm_id: osmId,
+      admin_level: Number.isInteger(adminLevelRaw) && adminLevelRaw > 0 ? adminLevelRaw : null,
+      tags,
+    });
+  }
+
+  return Array.from(out.values()).sort((a, b) => {
+    const aLevel = a.admin_level ?? Number.MAX_SAFE_INTEGER;
+    const bLevel = b.admin_level ?? Number.MAX_SAFE_INTEGER;
+    if (aLevel !== bLevel) return aLevel - bLevel;
+    return a.osm_id - b.osm_id;
+  });
 };

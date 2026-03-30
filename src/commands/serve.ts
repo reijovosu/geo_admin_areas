@@ -1,12 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { gunzipSync } from "node:zlib";
+import { DatabaseSync } from "node:sqlite";
 import {
   backupFilePath,
-  readCompressedBackupBuffer,
+  ensureJsonFromCompressedBackup,
+  listBackupJsonFiles,
   readJsonFile,
 } from "../lib/fs.js";
+import {
+  bootstrapLocalData,
+  createStartupStatus,
+  getBootstrapSummary,
+  markStartupFailure,
+} from "../lib/bootstrap.js";
 import type { BackupPayload, CountriesPayload, ServeOptions } from "../lib/types.js";
 
 interface BackupIndexItem {
@@ -16,6 +23,11 @@ interface BackupIndexItem {
   rows: number;
   kind: "admin_areas" | "countries";
   updated_at: string;
+}
+
+interface ParentIndexItem {
+  osm_id: number;
+  parent_osm_id: number | null;
 }
 
 const sendHtml = (res: http.ServerResponse, statusCode: number, html: string): void => {
@@ -61,6 +73,17 @@ const createOpenApiDocument = (baseUrl: string) => ({
         responses: {
           "200": {
             description: "Server status",
+          },
+        },
+      },
+    },
+    "/status": {
+      get: {
+        tags: ["System"],
+        summary: "Startup bootstrap status",
+        responses: {
+          "200": {
+            description: "Current local bootstrap progress and SQLite readiness",
           },
         },
       },
@@ -125,6 +148,48 @@ const createOpenApiDocument = (baseUrl: string) => ({
           },
           "404": {
             description: "No data found for the requested country or level",
+          },
+        },
+      },
+    },
+    "/parents": {
+      get: {
+        tags: ["Admin Areas"],
+        summary: "Return parent OSM ids for one country and child admin level",
+        parameters: [
+          {
+            name: "country",
+            in: "query",
+            required: true,
+            description: "Two-letter ISO country code, for example EE",
+            schema: {
+              type: "string",
+              example: "EE",
+            },
+          },
+          {
+            name: "level",
+            in: "query",
+            required: true,
+            description: "Child admin level number",
+            schema: {
+              type: "integer",
+              example: 9,
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Parent mapping rows with osm_id and parent_osm_id",
+          },
+          "400": {
+            description: "Missing or invalid query params",
+          },
+          "404": {
+            description: "No parent mappings found for the requested country and level",
+          },
+          "503": {
+            description: "Parent SQLite database is not ready yet",
           },
         },
       },
@@ -267,35 +332,9 @@ const createSwaggerHtml = (specUrl: string) => `<!doctype html>
   </body>
 </html>`;
 
-const listBackupFiles = (dataDir: string): string[] => {
-  if (!fs.existsSync(dataDir)) return [];
-  const out = new Set<string>();
-
-  for (const name of fs.readdirSync(dataDir)) {
-    const matchJson = name.match(/^([A-Z]{2})_L(\d+)\.json$/i);
-    if (matchJson) {
-      out.add(`${matchJson[1].toUpperCase()}_L${Number(matchJson[2])}.json`);
-      continue;
-    }
-
-    const matchGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz$/i);
-    if (matchGz) {
-      out.add(`${matchGz[1].toUpperCase()}_L${Number(matchGz[2])}.json`);
-      continue;
-    }
-
-    const matchSplitGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz\.part-\d+$/i);
-    if (matchSplitGz) {
-      out.add(`${matchSplitGz[1].toUpperCase()}_L${Number(matchSplitGz[2])}.json`);
-    }
-  }
-
-  return Array.from(out).sort();
-};
-
 const listCountryLevels = (dataDir: string, countryCode: string): number[] => {
   const country = countryCode.toUpperCase();
-  return listBackupFiles(dataDir)
+  return listBackupJsonFiles(dataDir)
     .map((file) => file.match(/^([A-Z]{2})_L(\d+)\.json$/i))
     .filter((match): match is RegExpMatchArray => match !== null && match[1].toUpperCase() === country)
     .map((match) => Number(match[2]))
@@ -319,7 +358,7 @@ const findRowsByOsmRef = (
     row: BackupPayload["rows"][number];
   }> = [];
 
-  for (const file of listBackupFiles(dataDir)) {
+  for (const file of listBackupJsonFiles(dataDir)) {
     const fileMatch = file.match(/^([A-Z]{2})_L(\d+)\.json$/i);
     if (!fileMatch) continue;
 
@@ -341,14 +380,33 @@ const findRowsByOsmRef = (
 };
 
 const ensureJsonFromGzip = (jsonFilePath: string): boolean => {
-  if (fs.existsSync(jsonFilePath)) return true;
+  return ensureJsonFromCompressedBackup(jsonFilePath);
+};
 
-  const gzBuffer = readCompressedBackupBuffer(jsonFilePath);
-  if (!gzBuffer) return false;
+const readParentMappings = (
+  dbPath: string,
+  countryCode: string,
+  level: number,
+): ParentIndexItem[] | null => {
+  if (!fs.existsSync(dbPath)) return null;
 
-  const jsonText = gunzipSync(gzBuffer).toString("utf-8");
-  fs.writeFileSync(jsonFilePath, jsonText, "utf-8");
-  return true;
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+
+  try {
+    const rows = db.prepare(`
+      SELECT child_osm_id, parent_osm_id
+      FROM parent_osm_ids
+      WHERE country_code = ? AND child_admin_level = ?
+      ORDER BY child_osm_id ASC
+    `).all(countryCode, level) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      osm_id: Number(row.child_osm_id),
+      parent_osm_id: row.parent_osm_id == null ? null : Number(row.parent_osm_id),
+    }));
+  } finally {
+    db.close();
+  }
 };
 
 const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
@@ -386,6 +444,8 @@ const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
 
 export const runServer = async (options: ServeOptions): Promise<void> => {
   const dataDir = path.resolve(process.cwd(), options.dataDir);
+  const parentDbPath = path.join(dataDir, "parent_osm_ids.sqlite");
+  const startupStatus = createStartupStatus(parentDbPath);
   const baseUrl = `http://${options.host}:${options.port}`;
   const docsUrl = `${baseUrl}/docs`;
   const openApiUrl = `${baseUrl}/openapi.json`;
@@ -402,6 +462,16 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       sendJson(res, 200, {
         ok: true,
         data_dir: dataDir,
+        startup: getBootstrapSummary(startupStatus),
+      });
+      return;
+    }
+
+    if (url.pathname === "/status") {
+      sendJson(res, 200, {
+        ok: startupStatus.state !== "failed",
+        data_dir: dataDir,
+        startup: getBootstrapSummary(startupStatus),
       });
       return;
     }
@@ -417,7 +487,7 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
     }
 
     if (url.pathname === "/backups") {
-      const items = listBackupFiles(dataDir)
+      const items = listBackupJsonFiles(dataDir)
         .concat(fs.existsSync(path.join(dataDir, "countries.json")) ? ["countries.json"] : [])
         .map((file) => toIndexItem(dataDir, file))
         .filter((item): item is BackupIndexItem => item !== null);
@@ -484,6 +554,50 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       return;
     }
 
+    if (url.pathname === "/parents") {
+      const country = String(url.searchParams.get("country") ?? "").toUpperCase();
+      const levelRaw = url.searchParams.get("level");
+
+      if (!country || levelRaw == null) {
+        sendJson(res, 400, {
+          error: "Provide query params: country=EE&level=9",
+        });
+        return;
+      }
+
+      const level = Number(levelRaw);
+      if (!Number.isFinite(level)) {
+        sendJson(res, 400, {
+          error: "Invalid level. Provide query params: country=EE&level=9",
+        });
+        return;
+      }
+
+      if (!fs.existsSync(parentDbPath)) {
+        sendJson(res, 503, {
+          error: "Parent SQLite database is not ready yet.",
+          startup: getBootstrapSummary(startupStatus),
+        });
+        return;
+      }
+
+      const items = readParentMappings(parentDbPath, country, level);
+      if (!items || items.length === 0) {
+        sendJson(res, 404, {
+          error: `No parent mappings found for ${country} level ${level}`,
+        });
+        return;
+      }
+
+      sendJson(res, 200, {
+        country_code: country,
+        level,
+        count: items.length,
+        items,
+      });
+      return;
+    }
+
     const routeMatch = url.pathname.match(/^\/admin-areas\/([A-Za-z]{2})\/(\d+)$/);
     if (routeMatch) {
       const country = routeMatch[1].toUpperCase();
@@ -543,10 +657,12 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
         "/docs",
         "/openapi.json",
         "/health",
+        "/status",
         "/countries",
         "/backups",
         "/admin-areas?country=EE",
         "/admin-areas?country=EE&level=2",
+        "/parents?country=EE&level=9",
         "/admin-areas/EE/2",
         "/relation/79510",
         "/osm/relation/79510",
@@ -563,5 +679,10 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       console.log(`Data dir: ${dataDir}`);
       resolve();
     });
+  });
+
+  void bootstrapLocalData(dataDir, startupStatus).catch((error) => {
+    markStartupFailure(startupStatus, error);
+    console.error(startupStatus.message);
   });
 };
