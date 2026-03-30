@@ -68,6 +68,18 @@ interface VerificationSample {
   source_level: number;
 }
 
+interface StoredParentRow {
+  child_osm_type: "relation" | "way";
+  child_osm_id: number;
+  parent_osm_type: "relation" | "way" | null;
+  parent_osm_id: number | null;
+  parent_admin_level: number | null;
+  live_fallback_failed: number;
+  live_fallback_error: string | null;
+  source_level: number;
+  source_file_level: number;
+}
+
 export interface ParentLevelStats {
   level: number;
   file_name: string;
@@ -181,6 +193,7 @@ const initializeDatabase = (dbPath: string): DatabaseSync => {
       child_osm_id INTEGER NOT NULL,
       child_admin_level INTEGER,
       child_center_geojson TEXT,
+      source_file_level INTEGER,
       parent_osm_type TEXT,
       parent_osm_id INTEGER,
       parent_admin_level INTEGER,
@@ -212,6 +225,11 @@ const initializeDatabase = (dbPath: string): DatabaseSync => {
   const hasChildCenter = columns.some((column) => String(column.name ?? "") === "child_center_geojson");
   if (!hasChildCenter) {
     db.exec("ALTER TABLE parent_osm_ids ADD COLUMN child_center_geojson TEXT");
+  }
+  const hasSourceFileLevel = columns.some((column) => String(column.name ?? "") === "source_file_level");
+  if (!hasSourceFileLevel) {
+    db.exec("ALTER TABLE parent_osm_ids ADD COLUMN source_file_level INTEGER");
+    db.exec("UPDATE parent_osm_ids SET source_file_level = child_admin_level WHERE source_file_level IS NULL");
   }
   const hasLiveFallbackFailed = columns.some((column) => String(column.name ?? "") === "live_fallback_failed");
   if (!hasLiveFallbackFailed) {
@@ -456,6 +474,7 @@ const upsertParentRow = (db: DatabaseSync, row: {
   child_osm_id: number;
   child_admin_level: number | null;
   child_center_geojson: string | null;
+  source_file_level: number;
   parent_osm_type: "relation" | "way" | null;
   parent_osm_id: number | null;
   parent_admin_level: number | null;
@@ -470,17 +489,19 @@ const upsertParentRow = (db: DatabaseSync, row: {
       child_osm_id,
       child_admin_level,
       child_center_geojson,
+      source_file_level,
       parent_osm_type,
       parent_osm_id,
       parent_admin_level,
       live_fallback_failed,
       live_fallback_error,
       source_level
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(child_osm_type, child_osm_id) DO UPDATE SET
       country_code = excluded.country_code,
       child_admin_level = excluded.child_admin_level,
       child_center_geojson = excluded.child_center_geojson,
+      source_file_level = excluded.source_file_level,
       parent_osm_type = excluded.parent_osm_type,
       parent_osm_id = excluded.parent_osm_id,
       parent_admin_level = excluded.parent_admin_level,
@@ -493,6 +514,7 @@ const upsertParentRow = (db: DatabaseSync, row: {
     row.child_osm_id,
     row.child_admin_level,
     row.child_center_geojson,
+    row.source_file_level,
     row.parent_osm_type,
     row.parent_osm_id,
     row.parent_admin_level,
@@ -522,47 +544,73 @@ const upsertVersionRow = (
   `).run(countryCode, level, refreshedAt, fileName);
 };
 
-const readVersionMap = (db: DatabaseSync, countryCode: string): Map<number, { refreshed_at: string; file_name: string }> => {
-  const rows = db.prepare(`
-    SELECT level, refreshed_at, file_name
+const readStoredVersion = (
+  db: DatabaseSync,
+  countryCode: string,
+  level: number,
+): { refreshed_at: string; file_name: string } | null => {
+  const row = db.prepare(`
+    SELECT refreshed_at, file_name
     FROM parent_osm_ids_versions
-    WHERE country_code = ?
-  `).all(countryCode) as Array<Record<string, unknown>>;
+    WHERE country_code = ? AND level = ?
+  `).get(countryCode, level) as Record<string, unknown> | undefined;
 
-  const out = new Map<number, { refreshed_at: string; file_name: string }>();
+  if (!row) return null;
+  return {
+    refreshed_at: String(row.refreshed_at ?? ""),
+    file_name: String(row.file_name ?? ""),
+  };
+};
+
+const readStoredRowsForSourceFile = (
+  db: DatabaseSync,
+  countryCode: string,
+  sourceFileLevel: number,
+): Map<string, StoredParentRow> => {
+  const rows = db.prepare(`
+    SELECT
+      child_osm_type,
+      child_osm_id,
+      parent_osm_type,
+      parent_osm_id,
+      parent_admin_level,
+      live_fallback_failed,
+      live_fallback_error,
+      source_level,
+      source_file_level
+    FROM parent_osm_ids
+    WHERE country_code = ? AND source_file_level = ?
+  `).all(countryCode, sourceFileLevel) as Array<Record<string, unknown>>;
+
+  const out = new Map<string, StoredParentRow>();
   for (const row of rows) {
-    const level = Number(row.level);
-    out.set(level, {
-      refreshed_at: String(row.refreshed_at ?? ""),
-      file_name: String(row.file_name ?? ""),
+    const childOsmType = String(row.child_osm_type) as "relation" | "way";
+    const childOsmId = Number(row.child_osm_id);
+    out.set(childKey(childOsmType, childOsmId), {
+      child_osm_type: childOsmType,
+      child_osm_id: childOsmId,
+      parent_osm_type:
+        row.parent_osm_type == null ? null : (String(row.parent_osm_type) as "relation" | "way"),
+      parent_osm_id: row.parent_osm_id == null ? null : Number(row.parent_osm_id),
+      parent_admin_level: row.parent_admin_level == null ? null : Number(row.parent_admin_level),
+      live_fallback_failed: Number(row.live_fallback_failed ?? 0),
+      live_fallback_error: row.live_fallback_error == null ? null : String(row.live_fallback_error),
+      source_level: Number(row.source_level),
+      source_file_level: Number(row.source_file_level ?? sourceFileLevel),
     });
   }
+
   return out;
 };
 
-const shouldRebuildCountry = (
-  db: DatabaseSync,
-  context: CountryContext,
+const shouldReprocessRow = (
+  existingRow: StoredParentRow | undefined,
+  sourceChanged: boolean,
 ): boolean => {
-  const existing = readVersionMap(db, context.countryCode);
-  if (existing.size !== context.files.length) return true;
-
-  for (const file of context.files) {
-    const payload = context.payloadsByLevel.get(file.level);
-    const existingRow = existing.get(file.level);
-    const refreshedAt = payload?.meta.refreshed_at || "";
-    if (!existingRow) return true;
-    if (existingRow.refreshed_at !== refreshedAt) return true;
-    if (existingRow.file_name !== file.fileName) return true;
-  }
-
-  const rowCount = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM parent_osm_ids
-    WHERE country_code = ?
-  `).get(context.countryCode) as Record<string, unknown>;
-
-  return Number(rowCount.count ?? 0) === 0;
+  if (sourceChanged) return true;
+  if (!existingRow) return true;
+  if (existingRow.live_fallback_failed === 1) return true;
+  return false;
 };
 
 const processCountry = async (
@@ -574,9 +622,6 @@ const processCountry = async (
 
   db.exec("BEGIN");
   try {
-    db.prepare("DELETE FROM parent_osm_ids WHERE country_code = ?").run(context.countryCode);
-    db.prepare("DELETE FROM parent_osm_ids_versions WHERE country_code = ?").run(context.countryCode);
-
     for (const file of context.files) {
       reportProgress(options, {
         phase: "processing_level",
@@ -590,6 +635,19 @@ const processCountry = async (
       if (!payload) continue;
 
       const refreshedAt = payload.meta.refreshed_at || utcNow();
+      const storedVersion = readStoredVersion(db, context.countryCode, file.level);
+      const sourceChanged =
+        !storedVersion ||
+        storedVersion.refreshed_at !== refreshedAt ||
+        storedVersion.file_name !== file.fileName;
+      const storedRowsByKey = readStoredRowsForSourceFile(db, context.countryCode, file.level);
+
+      if (sourceChanged) {
+        db.prepare(
+          "DELETE FROM parent_osm_ids WHERE country_code = ? AND source_file_level = ?",
+        ).run(context.countryCode, file.level);
+      }
+
       const levelStats: ParentLevelStats = {
         level: file.level,
         file_name: file.fileName,
@@ -602,6 +660,11 @@ const processCountry = async (
       };
 
       for (const row of payload.rows) {
+        const existingRow = storedRowsByKey.get(childKey(row.osm_type, row.osm_id));
+        if (!shouldReprocessRow(existingRow, sourceChanged)) {
+          continue;
+        }
+
         const child: ChildCandidate = {
           country_code: row.country_code,
           osm_type: row.osm_type,
@@ -643,6 +706,7 @@ const processCountry = async (
           child_osm_id: row.osm_id,
           child_admin_level: row.admin_level,
           child_center_geojson: row.center_geojson || null,
+          source_file_level: file.level,
           parent_osm_type: finalResolution.parent?.osm_type ?? null,
           parent_osm_id: finalResolution.parent?.osm_id ?? null,
           parent_admin_level: finalResolution.parent?.admin_level ?? null,
@@ -662,7 +726,14 @@ const processCountry = async (
       }
 
       upsertVersionRow(db, context.countryCode, file.level, refreshedAt, file.fileName);
-      stats.push(levelStats);
+      if (
+        sourceChanged ||
+        levelStats.live_fallback_failed > 0 ||
+        levelStats.matched > 0 ||
+        levelStats.unmatched > 0
+      ) {
+        stats.push(levelStats);
+      }
     }
 
     db.exec("COMMIT");
@@ -826,9 +897,8 @@ export const calculateParentOsmIds = async (
       });
 
       const context = loadCountryContext(dataDir, countryCode, files);
-      const rebuild = shouldRebuildCountry(db, context);
-      if (rebuild) {
       const countryStats = await processCountry(db, context, options);
+      if (countryStats.length > 0) {
         allStats.push(...countryStats);
         countriesProcessed += 1;
       } else {
