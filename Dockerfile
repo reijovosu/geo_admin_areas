@@ -20,6 +20,7 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8787
 ENV DATA_DIR=/app/data
+ENV NODE_OPTIONS=--max-old-space-size=8192
 
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/package-lock.json ./package-lock.json

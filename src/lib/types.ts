@@ -67,3 +67,29 @@ export interface ServeOptions {
   host: string;
   port: number;
 }
+
+export interface StartupStatus {
+  state: "pending" | "running" | "ready" | "failed";
+  phase:
+    | "idle"
+    | "discovering"
+    | "unpacking"
+    | "preparing_database"
+    | "loading_country"
+    | "processing_level"
+    | "resolving_live"
+    | "verifying_country"
+    | "complete"
+    | "failed";
+  db_path: string;
+  started_at: string | null;
+  finished_at: string | null;
+  total_backup_files: number;
+  unpacked_backup_files: number;
+  countries_total: number;
+  countries_completed: number;
+  current_file: string | null;
+  current_country: string | null;
+  message: string;
+  error: string | null;
+}

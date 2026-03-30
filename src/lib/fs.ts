@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 
 const COMPRESSED_BACKUP_PART_SIZE_BYTES = 50_000_000;
 
@@ -101,6 +102,43 @@ export const readCompressedBackupBuffer = (filePath: string): Buffer | null => {
   if (partPaths.length === 0) return null;
 
   return Buffer.concat(partPaths.map((partPath) => fs.readFileSync(partPath)));
+};
+
+export const ensureJsonFromCompressedBackup = (jsonFilePath: string): boolean => {
+  if (fs.existsSync(jsonFilePath)) return true;
+
+  const gzBuffer = readCompressedBackupBuffer(jsonFilePath);
+  if (!gzBuffer) return false;
+
+  const jsonText = gunzipSync(gzBuffer).toString("utf-8");
+  fs.writeFileSync(jsonFilePath, jsonText, "utf-8");
+  return true;
+};
+
+export const listBackupJsonFiles = (dataDir: string): string[] => {
+  if (!fs.existsSync(dataDir)) return [];
+  const out = new Set<string>();
+
+  for (const name of fs.readdirSync(dataDir)) {
+    const matchJson = name.match(/^([A-Z]{2})_L(\d+)\.json$/i);
+    if (matchJson) {
+      out.add(`${matchJson[1].toUpperCase()}_L${Number(matchJson[2])}.json`);
+      continue;
+    }
+
+    const matchGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz$/i);
+    if (matchGz) {
+      out.add(`${matchGz[1].toUpperCase()}_L${Number(matchGz[2])}.json`);
+      continue;
+    }
+
+    const matchSplitGz = name.match(/^([A-Z]{2})_L(\d+)\.json\.gz\.part-\d+$/i);
+    if (matchSplitGz) {
+      out.add(`${matchSplitGz[1].toUpperCase()}_L${Number(matchSplitGz[2])}.json`);
+    }
+  }
+
+  return Array.from(out).sort();
 };
 
 export const readJsonFile = <T>(filePath: string): T => {
