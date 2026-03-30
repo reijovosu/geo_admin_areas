@@ -102,7 +102,7 @@ Container environment variables:
 - `DATA_DIR` default: `/app/data`
 - `NODE_OPTIONS` default: `--max-old-space-size=8192`
 
-The server bootstrap can parse very large backup files when unpacking data and building `parent_osm_ids.sqlite`, so container memory matters. If you run into heap failures during startup, raise the Node heap explicitly:
+The server bootstrap can parse very large backup files when unpacking data and building `runtime/parent_osm_ids.sqlite`, so container memory matters. If you run into heap failures during startup, raise the Node heap explicitly:
 
 ```bash
 docker run -d \
@@ -229,13 +229,13 @@ npm run backup:global:refresh:push
 Build a local-only SQLite cache of straight parent mappings from the JSON backup files:
 
 ```bash
-npm run parents -- --data-dir=./data --db-path=./data/parent_osm_ids.sqlite
+npm run parents -- --data-dir=./data --db-path=./data/runtime/parent_osm_ids.sqlite
 ```
 
 Optional verification run:
 
 ```bash
-npm run parents -- --data-dir=./data --db-path=./data/parent_osm_ids.sqlite --countries=EE --verify=1 --verify-sample-size=25
+npm run parents -- --data-dir=./data --db-path=./data/runtime/parent_osm_ids.sqlite --countries=EE --verify=1 --verify-sample-size=25
 ```
 
 How it works:

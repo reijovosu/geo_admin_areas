@@ -3,8 +3,8 @@ dist/
 *.log
 *.raw.json
 data/[A-Za-z][A-Za-z]_L*.json
-data/parent_osm_ids.sqlite
-data/parent_osm_ids.sqlite-*
+data/runtime/parent_osm_ids.sqlite
+data/runtime/parent_osm_ids.sqlite-*
 .DS_Store
 Thumbs.db
 pull.sh

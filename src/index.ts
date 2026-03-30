@@ -1,5 +1,11 @@
 import path from "node:path";
-import { parseCSVArg, parseIntList, parseList, parseNumber, parseString } from "./lib/cli.js";
+import {
+  parseCSVArg,
+  parseIntList,
+  parseList,
+  parseNumber,
+  parseString,
+} from "./lib/cli.js";
 import { runBackup } from "./commands/backup.js";
 import { runParents } from "./commands/parents.js";
 import { runServer } from "./commands/serve.js";
@@ -21,20 +27,30 @@ const main = async (): Promise<void> => {
 
   if (command === "backup") {
     const countries = parseList(parseCSVArg(args, "countries"), ["EE"]);
-    const levels = parseIntList(parseCSVArg(args, "levels"), [2, 6, 7, 8, 9, 10]);
+    const levels = parseIntList(
+      parseCSVArg(args, "levels"),
+      [2, 6, 7, 8, 9, 10],
+    );
     const outDir = parseString(args, "out-dir", "./data");
     const delayMs = parseNumber(args, "delay-ms", 300);
-    const allCountriesRaw = parseString(args, "all-countries", "0").toLowerCase();
+    const allCountriesRaw = parseString(
+      args,
+      "all-countries",
+      "0",
+    ).toLowerCase();
     const allLevelsRaw = parseString(args, "all-levels", "0").toLowerCase();
     const forceRaw = parseString(args, "force", "0").toLowerCase();
     const staleDays = parseNumber(args, "stale-days", 0);
     const saveRawRaw = parseString(args, "save-raw", "0").toLowerCase();
     const allCountries =
-      allCountriesRaw === "1" || allCountriesRaw === "true" || allCountriesRaw === "yes";
+      allCountriesRaw === "1" ||
+      allCountriesRaw === "true" ||
+      allCountriesRaw === "yes";
     const allLevels =
       allLevelsRaw === "1" || allLevelsRaw === "true" || allLevelsRaw === "yes";
     const force = forceRaw === "1" || forceRaw === "true" || forceRaw === "yes";
-    const saveRaw = saveRawRaw === "1" || saveRawRaw === "true" || saveRawRaw === "yes";
+    const saveRaw =
+      saveRawRaw === "1" || saveRawRaw === "true" || saveRawRaw === "yes";
 
     await runBackup({
       countries,
@@ -51,7 +67,11 @@ const main = async (): Promise<void> => {
   }
 
   if (command === "serve") {
-    const dataDir = parseString(args, "data-dir", envOrFallback("DATA_DIR", "./data"));
+    const dataDir = parseString(
+      args,
+      "data-dir",
+      envOrFallback("DATA_DIR", "./data"),
+    );
     const host = parseString(args, "host", envOrFallback("HOST", "127.0.0.1"));
     const port = parseNumber(args, "port", envNumberOrFallback("PORT", 8787));
 
@@ -64,8 +84,16 @@ const main = async (): Promise<void> => {
   }
 
   if (command === "parents") {
-    const dataDir = parseString(args, "data-dir", envOrFallback("DATA_DIR", "./data"));
-    const dbPath = parseString(args, "db-path", path.join(dataDir, "parent_osm_ids.sqlite"));
+    const dataDir = parseString(
+      args,
+      "data-dir",
+      envOrFallback("DATA_DIR", "./data"),
+    );
+    const dbPath = parseString(
+      args,
+      "db-path",
+      path.join(dataDir, "runtime/parent_osm_ids.sqlite"),
+    );
     const countries = parseList(parseCSVArg(args, "countries"), []);
     const levels = parseIntList(parseCSVArg(args, "levels"), []);
     const verifyRaw = parseString(args, "verify", "0").toLowerCase();
@@ -89,7 +117,7 @@ const main = async (): Promise<void> => {
   npm run backup -- --all-countries=1 --all-levels=1 --out-dir=./data --delay-ms=400 --save-raw=0
   npm run backup -- --all-countries=1 --all-levels=1 --stale-days=7 --out-dir=./data --delay-ms=400 --save-raw=0
   npm run backup -- --all-countries=1 --all-levels=1 --force=1 --out-dir=./data --delay-ms=400 --save-raw=0
-  npm run parents -- --data-dir=./data --db-path=./data/parent_osm_ids.sqlite --countries=EE --verify=1
+  npm run parents -- --data-dir=./data --db-path=./data/runtime/parent_osm_ids.sqlite --countries=EE --verify=1
   npm run serve -- --data-dir=./data --host=127.0.0.1 --port=8787
 `);
 };

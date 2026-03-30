@@ -14,7 +14,11 @@ import {
   getBootstrapSummary,
   markStartupFailure,
 } from "../lib/bootstrap.js";
-import type { BackupPayload, CountriesPayload, ServeOptions } from "../lib/types.js";
+import type {
+  BackupPayload,
+  CountriesPayload,
+  ServeOptions,
+} from "../lib/types.js";
 
 interface BackupIndexItem {
   file: string;
@@ -30,13 +34,21 @@ interface ParentIndexItem {
   parent_osm_id: number | null;
 }
 
-const sendHtml = (res: http.ServerResponse, statusCode: number, html: string): void => {
+const sendHtml = (
+  res: http.ServerResponse,
+  statusCode: number,
+  html: string,
+): void => {
   res.statusCode = statusCode;
   res.setHeader("content-type", "text/html; charset=utf-8");
   res.end(html);
 };
 
-const sendJson = (res: http.ServerResponse, statusCode: number, payload: unknown): void => {
+const sendJson = (
+  res: http.ServerResponse,
+  statusCode: number,
+  payload: unknown,
+): void => {
   res.statusCode = statusCode;
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(`${JSON.stringify(payload, null, 2)}\n`);
@@ -60,11 +72,7 @@ const createOpenApiDocument = (baseUrl: string) => ({
       description: "Local server",
     },
   ],
-  tags: [
-    { name: "System" },
-    { name: "Catalog" },
-    { name: "Admin Areas" },
-  ],
+  tags: [{ name: "System" }, { name: "Catalog" }, { name: "Admin Areas" }],
   paths: {
     "/health": {
       get: {
@@ -83,7 +91,8 @@ const createOpenApiDocument = (baseUrl: string) => ({
         summary: "Startup bootstrap status",
         responses: {
           "200": {
-            description: "Current local bootstrap progress and SQLite readiness",
+            description:
+              "Current local bootstrap progress and SQLite readiness",
           },
         },
       },
@@ -186,7 +195,8 @@ const createOpenApiDocument = (baseUrl: string) => ({
             description: "Missing or invalid query params",
           },
           "404": {
-            description: "No parent mappings found for the requested country and level",
+            description:
+              "No parent mappings found for the requested country and level",
           },
           "503": {
             description: "Parent SQLite database is not ready yet",
@@ -336,7 +346,10 @@ const listCountryLevels = (dataDir: string, countryCode: string): number[] => {
   const country = countryCode.toUpperCase();
   return listBackupJsonFiles(dataDir)
     .map((file) => file.match(/^([A-Z]{2})_L(\d+)\.json$/i))
-    .filter((match): match is RegExpMatchArray => match !== null && match[1].toUpperCase() === country)
+    .filter(
+      (match): match is RegExpMatchArray =>
+        match !== null && match[1].toUpperCase() === country,
+    )
     .map((match) => Number(match[2]))
     .sort((a, b) => a - b);
 };
@@ -393,16 +406,21 @@ const readParentMappings = (
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT child_osm_id, parent_osm_id
       FROM parent_osm_ids
       WHERE country_code = ? AND child_admin_level = ?
       ORDER BY child_osm_id ASC
-    `).all(countryCode, level) as Array<Record<string, unknown>>;
+    `,
+      )
+      .all(countryCode, level) as Array<Record<string, unknown>>;
 
     return rows.map((row) => ({
       osm_id: Number(row.child_osm_id),
-      parent_osm_id: row.parent_osm_id == null ? null : Number(row.parent_osm_id),
+      parent_osm_id:
+        row.parent_osm_id == null ? null : Number(row.parent_osm_id),
     }));
   } finally {
     db.close();
@@ -444,7 +462,7 @@ const toIndexItem = (dataDir: string, file: string): BackupIndexItem | null => {
 
 export const runServer = async (options: ServeOptions): Promise<void> => {
   const dataDir = path.resolve(process.cwd(), options.dataDir);
-  const parentDbPath = path.join(dataDir, "parent_osm_ids.sqlite");
+  const parentDbPath = path.join(dataDir, "runtime/parent_osm_ids.sqlite");
   const startupStatus = createStartupStatus(parentDbPath);
   const baseUrl = `http://${options.host}:${options.port}`;
   const docsUrl = `${baseUrl}/docs`;
@@ -488,7 +506,11 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
 
     if (url.pathname === "/backups") {
       const items = listBackupJsonFiles(dataDir)
-        .concat(fs.existsSync(path.join(dataDir, "countries.json")) ? ["countries.json"] : [])
+        .concat(
+          fs.existsSync(path.join(dataDir, "countries.json"))
+            ? ["countries.json"]
+            : [],
+        )
         .map((file) => toIndexItem(dataDir, file))
         .filter((item): item is BackupIndexItem => item !== null);
       sendJson(res, 200, {
@@ -502,7 +524,8 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       const filePath = path.join(dataDir, "countries.json");
       if (!fs.existsSync(filePath)) {
         sendJson(res, 404, {
-          error: "countries.json not found. Run backup with --all-countries=1 first.",
+          error:
+            "countries.json not found. Run backup with --all-countries=1 first.",
         });
         return;
       }
@@ -511,7 +534,9 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
     }
 
     if (url.pathname === "/admin-areas") {
-      const country = String(url.searchParams.get("country") ?? "").toUpperCase();
+      const country = String(
+        url.searchParams.get("country") ?? "",
+      ).toUpperCase();
       const levelRaw = url.searchParams.get("level");
 
       if (!country) {
@@ -546,7 +571,9 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
 
       const filePath = backupFilePath(dataDir, country, level);
       if (!ensureJsonFromGzip(filePath)) {
-        sendJson(res, 404, { error: `Backup not found for ${country} L${level}` });
+        sendJson(res, 404, {
+          error: `Backup not found for ${country} L${level}`,
+        });
         return;
       }
 
@@ -555,7 +582,9 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
     }
 
     if (url.pathname === "/parents") {
-      const country = String(url.searchParams.get("country") ?? "").toUpperCase();
+      const country = String(
+        url.searchParams.get("country") ?? "",
+      ).toUpperCase();
       const levelRaw = url.searchParams.get("level");
 
       if (!country || levelRaw == null) {
@@ -598,7 +627,9 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
       return;
     }
 
-    const routeMatch = url.pathname.match(/^\/admin-areas\/([A-Za-z]{2})\/(\d+)$/);
+    const routeMatch = url.pathname.match(
+      /^\/admin-areas\/([A-Za-z]{2})\/(\d+)$/,
+    );
     if (routeMatch) {
       const country = routeMatch[1].toUpperCase();
       const level = Number(routeMatch[2]);
@@ -606,7 +637,9 @@ export const runServer = async (options: ServeOptions): Promise<void> => {
 
       const payload = loadBackupPayload(filePath);
       if (!payload) {
-        sendJson(res, 404, { error: `Backup not found for ${country} L${level}` });
+        sendJson(res, 404, {
+          error: `Backup not found for ${country} L${level}`,
+        });
         return;
       }
 
